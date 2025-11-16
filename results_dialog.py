@@ -7,18 +7,23 @@ from PySide6.QtWidgets import (
     QMessageBox, QGroupBox, QFormLayout, QWidget, QComboBox
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
 class ResultsDialog(QDialog):
-    def __init__(self, bars, U, N_coeffs, U_coeffs, parent=None):
+    def __init__(self, bars, U, N_coeffs, U_coeffs, parent=None, supports=None, node_forces=None):
         super().__init__(parent)
         self.bars = bars
         self.U = U
         self.N_coeffs = N_coeffs
         self.U_coeffs = U_coeffs
         self.total_length = sum(bar['L'] for bar in bars)
+        
+        # Сохраняем данные о нагрузках и опорах
+        self.supports = supports if supports is not None else []
+        self.node_forces = node_forces if node_forces is not None else []
         
         self.setWindowTitle("Результаты расчёта стержневой системы")
         self.setModal(True)
@@ -160,10 +165,16 @@ class ResultsDialog(QDialog):
         self.n_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.n_table.setSelectionMode(QTableWidget.NoSelection)
         
-        # Таблица напряжений
+        # Таблица напряжений - УВЕЛИЧИВАЕМ КОЛИЧЕСТВО СТОЛБЦОВ ДО 5
         self.sigma_table = QTableWidget()
-        self.sigma_table.setColumnCount(4)
-        self.sigma_table.setHorizontalHeaderLabels(["Номер стержня", "σx в начале стержня, Па", "σx в конце стержня, Па", "Допустимое напряжение, Па"])
+        self.sigma_table.setColumnCount(5)  # Было 4, стало 5
+        self.sigma_table.setHorizontalHeaderLabels([
+            "Номер стержня", 
+            "σx в начале стержня, Па", 
+            "σx в конце стержня, Па", 
+            "Допустимое напряжение, Па",
+            "Соответствие норме"  # НОВЫЙ СТОЛБЕЦ
+        ])
         self.sigma_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         
         # СИНИЙ ЦВЕТ ДЛЯ ЗАГОЛОВКОВ ТАБЛИЦЫ
@@ -328,11 +339,14 @@ class ResultsDialog(QDialog):
         self.section_global_coord = QLabel("-")
         self.section_Nx = QLabel("-")
         self.section_sigma = QLabel("-")
+        self.section_sigma_allowable = QLabel("-")  # НОВОЕ: допустимое напряжение
+        self.section_compliance = QLabel("-")       # НОВОЕ: соответствие норме
         self.section_Ux = QLabel("-")
         
         # Установим стили для результатов
         for label in [self.section_element, self.section_local_coord, self.section_global_coord, 
-                     self.section_Nx, self.section_sigma, self.section_Ux]:
+                    self.section_Nx, self.section_sigma, self.section_sigma_allowable,
+                    self.section_compliance, self.section_Ux]:
             label.setStyleSheet("background-color: #f0f0f0; padding: 4px; border: 1px solid #ccc;")
         
         results_layout.addRow("Элемент:", self.section_element)
@@ -340,6 +354,8 @@ class ResultsDialog(QDialog):
         results_layout.addRow("Глобальная координата, м:", self.section_global_coord)
         results_layout.addRow("Продольная сила Nx, Н:", self.section_Nx)
         results_layout.addRow("Нормальное напряжение σx, Па:", self.section_sigma)
+        results_layout.addRow("Допустимое напряжение, Па:", self.section_sigma_allowable)  # НОВАЯ СТРОКА
+        results_layout.addRow("Соответствие норме:", self.section_compliance)              # НОВАЯ СТРОКА
         results_layout.addRow("Перемещение Ux, м:", self.section_Ux)
         
         results_group.setLayout(results_layout)
@@ -385,59 +401,25 @@ class ResultsDialog(QDialog):
         sigma_x = Nx / bar['A']
         Ux = self.U_coeffs[element_idx][0] + x_local * self.U_coeffs[element_idx][1] + (x_local**2) * self.U_coeffs[element_idx][2]
         
+        # Проверка соответствия допустимому напряжению
+        sigma_allowable = bar['sigma']
+        if abs(sigma_x) <= sigma_allowable:
+            compliance_text = "✅ Да (напряжение в норме)"
+            compliance_style = "background-color: #d4ffd4; color: #006400; padding: 4px; border: 1px solid #00aa00;"
+        else:
+            compliance_text = "❌ Нет (превышение допустимого напряжения!)"
+            compliance_style = "background-color: #ffd4d4; color: #8b0000; padding: 4px; border: 1px solid #ff0000; font-weight: bold;"
+        
         # Обновление интерфейса
         self.section_element.setText(f"Стержень {element_idx + 1}")
         self.section_local_coord.setText(f"{x_local:.4f}")
         self.section_global_coord.setText(f"{x_global:.4f}")
         self.section_Nx.setText(f"{Nx:.4f}")
         self.section_sigma.setText(f"{sigma_x:.4f}")
+        self.section_sigma_allowable.setText(f"{sigma_allowable:.4f}")
+        self.section_compliance.setText(compliance_text)
+        self.section_compliance.setStyleSheet(compliance_style)
         self.section_Ux.setText(f"{Ux:.8f}")
-
-    def draw_structure_scheme(self, ax, node_positions, total_length):
-        """Рисование схемы стержневой системы с учетом площади сечения"""
-        # Находим максимальную площадь сечения для масштабирования
-        max_A = max(bar['A'] for bar in self.bars)
-        min_A = min(bar['A'] for bar in self.bars)
-        
-        # Масштабируем высоту стержней от 0.1 до 0.4 в зависимости от площади
-        def scale_height(A):
-            if max_A == min_A:
-                return 0.2  # среднее значение, если все площади одинаковы
-            return 0.1 + 0.3 * (A - min_A) / (max_A - min_A)
-        
-        # Рисуем стержни с толщиной, пропорциональной площади сечения
-        current_pos = 0
-        for i, bar in enumerate(self.bars):
-            L = bar['L']
-            A = bar['A']
-            
-            # Высота стержня пропорциональна площади сечения
-            height = scale_height(A)
-            
-            # Рисуем стержень как прямоугольник
-            rect = plt.Rectangle((current_pos, -height/2), L, height, 
-                            facecolor='#CD853F', alpha=0.8, edgecolor='#8B4513', linewidth=1.5)
-            ax.add_patch(rect)
-            
-            # Подпись стержня (номер)
-            mid_pos = current_pos + L / 2
-            ax.text(mid_pos, height/2 + 0.05, f'{i+1}', ha='center', va='bottom', 
-                    fontsize=10, fontweight='bold', color='darkblue',
-                    bbox=dict(boxstyle="round,pad=0.2", facecolor="lightblue", alpha=0.7))
-            
-            current_pos += L
-        
-        # Рисуем узлы
-        for i, pos in enumerate(node_positions):
-            ax.plot(pos, 0, 'ko', markersize=6, markerfacecolor='white', markeredgewidth=2)
-            ax.text(pos, 0.25, f'{i+1}', ha='center', va='bottom', 
-                    fontsize=10, fontweight='bold', color='darkgreen')
-        
-        # Настройка внешнего вида схемы
-        ax.set_ylim(-0.3, 0.4)
-        ax.set_aspect('auto')  # Автоматическое соотношение сторон для растягивания по ширине
-        ax.axis('off')
-        ax.set_title('Схема стержневой системы', fontsize=12, fontweight='bold', pad=10)
     
     def calculate_all_results(self):
         """Расчет всех результатов для отображения"""
@@ -446,10 +428,10 @@ class ResultsDialog(QDialog):
         self.update_detailed_table()  # Инициализируем детальную таблицу
     
     def calculate_plots(self):
-        """Расчет и отображение графиков эпюр со схемой стержневой системы"""
+        """Расчет и отображение графиков эпюр с глобальными координатами под каждым эпюром"""
         self.fig.clear()
         
-        # Увеличиваем общий размер фигуры
+        # Устанавливаем размер фигуры
         self.fig.set_size_inches(12, 10)
         
         # Рассчитываем общую длину конструкции и позиции узлов
@@ -458,17 +440,13 @@ class ResultsDialog(QDialog):
         for bar in self.bars:
             node_positions.append(node_positions[-1] + bar['L'])
         
-        # Создаем 4 subplot: схема + 3 эпюры
-        gs = self.fig.add_gridspec(4, 1, height_ratios=[0.4, 1, 1, 1])
+        # Создаем 3 subplot для эпюр с увеличенными вертикальными отступами
+        gs = self.fig.add_gridspec(3, 1, height_ratios=[1, 1, 1])
         
-        # 1. Subplot для схемы стержневой системы
-        ax_scheme = self.fig.add_subplot(gs[0])
-        self.draw_structure_scheme(ax_scheme, node_positions, total_length)
-        
-        # 2. Subplot для эпюр
-        ax1 = self.fig.add_subplot(gs[1])
-        ax2 = self.fig.add_subplot(gs[2])
-        ax3 = self.fig.add_subplot(gs[3])
+        # Subplot для эпюр
+        ax1 = self.fig.add_subplot(gs[0])
+        ax2 = self.fig.add_subplot(gs[1])
+        ax3 = self.fig.add_subplot(gs[2])
         
         # Подготовка данных для графиков
         x_global = []
@@ -504,49 +482,144 @@ class ResultsDialog(QDialog):
         x_max = total_length
         
         # Связываем оси X всех subplot
-        ax_scheme.set_xlim(x_min, x_max)
         ax1.set_xlim(x_min, x_max)
         ax2.set_xlim(x_min, x_max)
         ax3.set_xlim(x_min, x_max)
         
-        # Эпюра Nx
+        # Эпюра Nx с увеличенными отступами для заголовка
         ax1.plot(x_global, Nx_values, 'r-', linewidth=2)
-        ax1.set_title('Эпюра продольных сил Nx', fontsize=11, fontweight='bold')
-        ax1.set_ylabel('Nx, Н', fontsize=10)
+        ax1.set_title('Эпюра продольных сил Nx', fontsize=12, fontweight='bold', pad=20)  # Увеличен pad
+        ax1.set_ylabel('Nx, Н', fontsize=10, labelpad=10)  # Добавлен labelpad
         ax1.grid(True, alpha=0.3)
         ax1.fill_between(x_global, Nx_values, alpha=0.3, color='red')
         
-        # Эпюра σx
+        # Эпюра σx с увеличенными отступами для заголовка
         ax2.plot(x_global, sigma_values, 'b-', linewidth=2)
-        ax2.set_title('Эпюра нормальных напряжений σx', fontsize=11, fontweight='bold')
-        ax2.set_ylabel('σx, Па', fontsize=10)
+        ax2.set_title('Эпюра нормальных напряжений σx', fontsize=12, fontweight='bold', pad=20)  # Увеличен pad
+        ax2.set_ylabel('σx, Па', fontsize=10, labelpad=10)  # Добавлен labelpad
         ax2.grid(True, alpha=0.3)
         ax2.fill_between(x_global, sigma_values, alpha=0.3, color='blue')
         
-        # Эпюра Ux
+        # Эпюра Ux с увеличенными отступами для заголовка
         ax3.plot(x_global, Ux_values, 'g-', linewidth=2)
-        ax3.set_title('Эпюра перемещений Ux', fontsize=11, fontweight='bold')
-        ax3.set_ylabel('Ux, м', fontsize=10)
-        ax3.set_xlabel('Длина конструкции, м', fontsize=10)
+        ax3.set_title('Эпюра перемещений Ux', fontsize=12, fontweight='bold', pad=20)  # Увеличен pad
+        ax3.set_ylabel('Ux, м', fontsize=10, labelpad=10)  # Добавлен labelpad
+        ax3.set_xlabel('Координата x, м', fontsize=10, labelpad=10)  # Добавлен labelpad
         ax3.grid(True, alpha=0.3)
         ax3.fill_between(x_global, Ux_values, alpha=0.3, color='green')
         
-        # Добавляем вертикальные линии от узлов схемы до всех эпюр
+        # Добавляем вертикальные линии в местах узлов
         for pos in node_positions:
-            # Линия через все subplot
-            for ax in [ax_scheme, ax1, ax2, ax3]:
+            for ax in [ax1, ax2, ax3]:
                 ax.axvline(x=pos, color='k', linestyle='-', alpha=0.5, linewidth=1)
+        
+        # ДОБАВЛЯЕМ ПОДПИСИ ГЛОБАЛЬНЫХ КООРДИНАТ ПОД КАЖДЫМ ЭПЮРОМ
+        
+        # Определяем шаг для делений в зависимости от общей длины
+        if total_length <= 2:
+            step = 0.25
+        elif total_length <= 10:
+            step = 0.5
+        else:
+            step = total_length / 10
+        
+        # Создаем равномерные деления с выбранным шагом
+        x_ticks = np.arange(0, total_length + step/2, step)
+        
+        # Устанавливаем деления на оси X для ВСЕХ графиков
+        for ax in [ax1, ax2, ax3]:
+            ax.set_xticks(x_ticks)
+            ax.set_xticklabels([f'{x:.2f}' for x in x_ticks], fontsize=8)
+        
+        # Добавляем вертикальные линии для основных делений
+        for x in x_ticks:
+            if x not in node_positions:  # Узлы уже отмечены
+                for ax in [ax1, ax2, ax3]:
+                    ax.axvline(x=x, color='gray', linestyle=':', alpha=0.3, linewidth=0.5)
         
         # Улучшаем читаемость подписей осей
         for ax in [ax1, ax2, ax3]:
-            ax.tick_params(axis='both', which='major', labelsize=9)
+            ax.tick_params(axis='both', which='major', labelsize=8)
+            # Убедимся, что оси X отображаются для всех графиков
+            ax.tick_params(axis='x', which='both', labelbottom=True)
         
-        # Скрываем оси X для всех subplot кроме нижнего
-        ax_scheme.tick_params(axis='x', which='both', bottom=False, labelbottom=False)
-        ax1.tick_params(axis='x', which='both', bottom=False, labelbottom=False)
-        ax2.tick_params(axis='x', which='both', bottom=False, labelbottom=False)
+        # Убираем подписи осей X для верхних графиков
+        ax1.set_xlabel('')
+        ax2.set_xlabel('')
         
-        self.fig.tight_layout()
+        # ДОБАВЛЯЕМ ПОДПИСИ ЗНАЧЕНИЙ В НАЧАЛЕ И КОНЦЕ СТЕРЖНЕЙ
+        
+        # Вычисляем значения в узлах для каждого стержня
+        current_position = 0
+        for i, bar in enumerate(self.bars):
+            L = bar['L']
+            A = bar['A']
+            
+            # Координаты начала и конца стержня
+            x_start = current_position
+            x_end = current_position + L
+            
+            # Значения в начале стержня (x=0)
+            Nx_start = self.N_coeffs[i][0]
+            sigma_start = Nx_start / A
+            Ux_start = self.U_coeffs[i][0]
+            
+            # Значения в конце стержня (x=L)
+            Nx_end = self.N_coeffs[i][0] + L * self.N_coeffs[i][1]
+            sigma_end = Nx_end / A
+            Ux_end = self.U_coeffs[i][0] + L * self.U_coeffs[i][1] + (L**2) * self.U_coeffs[i][2]
+            
+            # Подписи для эпюры Nx
+            ax1.annotate(f'{Nx_start:.2f}', xy=(x_start, Nx_start), xytext=(5, 5),
+                        textcoords='offset points', fontsize=8, color='darkred',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                        arrowprops=dict(arrowstyle='->', color='darkred', lw=0.5))
+            
+            ax1.annotate(f'{Nx_end:.2f}', xy=(x_end, Nx_end), xytext=(5, 5),
+                        textcoords='offset points', fontsize=8, color='darkred',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                        arrowprops=dict(arrowstyle='->', color='darkred', lw=0.5))
+            
+            # Подписи для эпюры σx
+            ax2.annotate(f'{sigma_start:.2f}', xy=(x_start, sigma_start), xytext=(5, 5),
+                        textcoords='offset points', fontsize=8, color='darkblue',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                        arrowprops=dict(arrowstyle='->', color='darkblue', lw=0.5))
+            
+            ax2.annotate(f'{sigma_end:.2f}', xy=(x_end, sigma_end), xytext=(5, 5),
+                        textcoords='offset points', fontsize=8, color='darkblue',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                        arrowprops=dict(arrowstyle='->', color='darkblue', lw=0.5))
+            
+            # Подписи для эпюры Ux
+            ax3.annotate(f'{Ux_start:.6f}', xy=(x_start, Ux_start), xytext=(5, 5),
+                        textcoords='offset points', fontsize=8, color='darkgreen',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                        arrowprops=dict(arrowstyle='->', color='darkgreen', lw=0.5))
+            
+            ax3.annotate(f'{Ux_end:.6f}', xy=(x_end, Ux_end), xytext=(5, 5),
+                        textcoords='offset points', fontsize=8, color='darkgreen',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                        arrowprops=dict(arrowstyle='->', color='darkgreen', lw=0.5))
+            
+            current_position += L
+        
+        # Обеспечиваем одинаковое соотношение сторон для всех графиков
+        # Увеличиваем отступы со всех сторон, особенно сверху и снизу
+        self.fig.tight_layout(rect=[0.03, 0.03, 0.97, 0.97], pad=4.0, h_pad=3.0)
+        
+        # Синхронизируем масштабирование по оси X
+        def on_xlim_changed(event_ax):
+            xlim = event_ax.get_xlim()
+            for ax in [ax1, ax2, ax3]:
+                if ax != event_ax:
+                    ax.set_xlim(xlim)
+        
+        # Подключаем обработчики изменения масштаба
+        ax1.callbacks.connect('xlim_changed', on_xlim_changed)
+        ax2.callbacks.connect('xlim_changed', on_xlim_changed)
+        ax3.callbacks.connect('xlim_changed', on_xlim_changed)
+        
         self.canvas.draw()
         
     def calculate_tables(self):
@@ -569,6 +642,17 @@ class ResultsDialog(QDialog):
             Nx_end = self.N_coeffs[i][0] + L * self.N_coeffs[i][1]  # N(x) = N0 + N1*x при x=L
             sigma_end = Nx_end / A  # σ = N/A
             
+            # Определяем максимальное по модулю напряжение в стержне
+            max_sigma = max(abs(sigma_start), abs(sigma_end))
+            
+            # Проверяем соответствие допустимому напряжению
+            if max_sigma <= sigma_allowable:
+                compliance = "✅ Да"
+                compliance_color = "green"
+            else:
+                compliance = "❌ Нет"
+                compliance_color = "red"
+            
             # Перемещения в начале и конце стержня
             Ux_start = self.U_coeffs[i][0]  # u(x) = u0 + u1*x + u2*x² при x=0
             Ux_end = self.U_coeffs[i][0] + L * self.U_coeffs[i][1] + (L**2) * self.U_coeffs[i][2]  # при x=L
@@ -580,12 +664,13 @@ class ResultsDialog(QDialog):
                 f"{Nx_end:.4f}"
             ])
             
-            # Данные для таблицы напряжений
+            # Данные для таблицы напряжений (теперь 5 столбцов)
             sigma_data.append([
                 str(i + 1),
                 f"{sigma_start:.4f}",
                 f"{sigma_end:.4f}",
-                f"{sigma_allowable:.4f}"
+                f"{sigma_allowable:.4f}",
+                compliance  # НОВЫЙ СТОЛБЕЦ
             ])
             
             # Данные для таблицы перемещений
@@ -609,6 +694,14 @@ class ResultsDialog(QDialog):
             for col, value in enumerate(data):
                 item = QTableWidgetItem(value)
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                
+                # Окрашиваем ячейку с проверкой соответствия
+                if col == 4:  # Столбец "Соответствие норме"
+                    if "✅" in value:
+                        item.setBackground(QColor(200, 255, 200))  # Зеленый фон для "Да"
+                    else:
+                        item.setBackground(QColor(255, 200, 200))  # Красный фон для "Нет"
+                
                 self.sigma_table.setItem(row, col, item)
         
         # Заполняем таблицу перемещений
@@ -784,20 +877,40 @@ class ResultsDialog(QDialog):
             elements.append(n_table)
             elements.append(Spacer(1, 15))
             
-            # Таблица нормальных напряжений
+          # Таблица нормальных напряжений - ОБНОВЛЕНА С ДОБАВЛЕНИЕМ СТОЛБЦА "СООТВЕТСТВИЕ НОРМЕ"
             elements.append(Paragraph("Нормальные напряжения σx", heading_style))
-            sigma_data = [["Номер стержня", "σx в начале, Па", "σx в конце, Па", "Допустимое, Па"]]
+            sigma_data = [["Номер стержня", "σx в начале, Па", "σx в конце, Па", "Допустимое, Па", "Соответствие норме"]]
+
             for i, bar in enumerate(self.bars):
                 L = bar['L']
                 A = bar['A']
                 sigma_allowable = bar['sigma']
+                
+                # Расчет напряжений в начале и конце стержня
                 Nx_start = self.N_coeffs[i][0] + 0 * self.N_coeffs[i][1]
                 Nx_end = self.N_coeffs[i][0] + L * self.N_coeffs[i][1]
                 sigma_start = Nx_start / A
                 sigma_end = Nx_end / A
-                sigma_data.append([str(i+1), f"{sigma_start:.4f}", f"{sigma_end:.4f}", f"{sigma_allowable:.4f}"])
-            
-            sigma_table = Table(sigma_data, colWidths=[25*mm, 45*mm, 45*mm, 45*mm])
+                
+                # Определяем максимальное по модулю напряжение в стержне
+                max_sigma = max(abs(sigma_start), abs(sigma_end))
+                
+                # Проверяем соответствие допустимому напряжению
+                if max_sigma <= sigma_allowable:
+                    compliance = "Да"
+                else:
+                    compliance = "Нет (Превышение)"
+                
+                sigma_data.append([
+                    str(i+1), 
+                    f"{sigma_start:.4f}", 
+                    f"{sigma_end:.4f}", 
+                    f"{sigma_allowable:.4f}",
+                    str(compliance)
+                ])
+
+            # Уменьшаем ширину столбцов, чтобы добавить пятый столбец
+            sigma_table = Table(sigma_data, colWidths=[20*mm, 35*mm, 35*mm, 35*mm, 35*mm])
             sigma_table.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2E5CB8")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.white),
@@ -808,7 +921,7 @@ class ResultsDialog(QDialog):
                 ('BACKGROUND', (0,1), (-1,-1), colors.beige),
                 ('FONTNAME', (0,1), (-1,-1), FONT_NAME),
                 ('FONTSIZE', (0,1), (-1,-1), 7),
-                ('GRID', (0,0), (-1,-1), 0.5, colors.black)
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
             ]))
             elements.append(sigma_table)
             elements.append(Spacer(1, 15))

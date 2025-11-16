@@ -352,7 +352,15 @@ class MainWindow(QMainWindow):
         
         try:
             # Создаем и показываем модальное окно с результатами
-            results_dialog = ResultsDialog(self.bars, self.current_U, self.N_coeffs, self.U_coeffs, self)
+            results_dialog = ResultsDialog( 
+            self.bars, 
+            self.current_U, 
+            self.N_coeffs, 
+            self.U_coeffs, 
+            self,
+            self.supports,  # передаем опоры
+            self.node_forces  # передаем сосредоточенные силы
+)
             results_dialog.exec()
             
         except Exception as e:
