@@ -314,6 +314,52 @@ class ResultsDialog(QDialog):
         self.section_Nx.setText(f"{Nx:.4f}")
         self.section_sigma.setText(f"{sigma_x:.4f}")
         self.section_Ux.setText(f"{Ux:.8f}")
+
+    def draw_structure_scheme(self, ax, node_positions, total_length):
+        """Рисование схемы стержневой системы с учетом площади сечения"""
+        # Находим максимальную площадь сечения для масштабирования
+        max_A = max(bar['A'] for bar in self.bars)
+        min_A = min(bar['A'] for bar in self.bars)
+        
+        # Масштабируем высоту стержней от 0.1 до 0.4 в зависимости от площади
+        def scale_height(A):
+            if max_A == min_A:
+                return 0.2  # среднее значение, если все площади одинаковы
+            return 0.1 + 0.3 * (A - min_A) / (max_A - min_A)
+        
+        # Рисуем стержни с толщиной, пропорциональной площади сечения
+        current_pos = 0
+        for i, bar in enumerate(self.bars):
+            L = bar['L']
+            A = bar['A']
+            
+            # Высота стержня пропорциональна площади сечения
+            height = scale_height(A)
+            
+            # Рисуем стержень как прямоугольник
+            rect = plt.Rectangle((current_pos, -height/2), L, height, 
+                            facecolor='#CD853F', alpha=0.8, edgecolor='#8B4513', linewidth=1.5)
+            ax.add_patch(rect)
+            
+            # Подпись стержня (номер)
+            mid_pos = current_pos + L / 2
+            ax.text(mid_pos, height/2 + 0.05, f'{i+1}', ha='center', va='bottom', 
+                    fontsize=10, fontweight='bold', color='darkblue',
+                    bbox=dict(boxstyle="round,pad=0.2", facecolor="lightblue", alpha=0.7))
+            
+            current_pos += L
+        
+        # Рисуем узлы
+        for i, pos in enumerate(node_positions):
+            ax.plot(pos, 0, 'ko', markersize=6, markerfacecolor='white', markeredgewidth=2)
+            ax.text(pos, 0.25, f'{i+1}', ha='center', va='bottom', 
+                    fontsize=10, fontweight='bold', color='darkgreen')
+        
+        # Настройка внешнего вида схемы
+        ax.set_ylim(-0.3, 0.4)
+        ax.set_aspect('auto')  # Автоматическое соотношение сторон для растягивания по ширине
+        ax.axis('off')
+        ax.set_title('Схема стержневой системы', fontsize=12, fontweight='bold', pad=10)
     
     def calculate_all_results(self):
         """Расчет всех результатов для отображения"""
@@ -321,8 +367,29 @@ class ResultsDialog(QDialog):
         self.calculate_tables()
     
     def calculate_plots(self):
-        """Расчет и отображение графиков"""
+        """Расчет и отображение графиков эпюр со схемой стержневой системы"""
         self.fig.clear()
+        
+        # Увеличиваем общий размер фигуры
+        self.fig.set_size_inches(12, 10)
+        
+        # Рассчитываем общую длину конструкции и позиции узлов
+        total_length = sum(bar['L'] for bar in self.bars)
+        node_positions = [0]
+        for bar in self.bars:
+            node_positions.append(node_positions[-1] + bar['L'])
+        
+        # Создаем 4 subplot: схема + 3 эпюры
+        gs = self.fig.add_gridspec(4, 1, height_ratios=[0.4, 1, 1, 1])
+        
+        # 1. Subplot для схемы стержневой системы
+        ax_scheme = self.fig.add_subplot(gs[0])
+        self.draw_structure_scheme(ax_scheme, node_positions, total_length)
+        
+        # 2. Subplot для эпюр
+        ax1 = self.fig.add_subplot(gs[1])
+        ax2 = self.fig.add_subplot(gs[2])
+        ax3 = self.fig.add_subplot(gs[3])
         
         # Подготовка данных для графиков
         x_global = []
@@ -332,49 +399,77 @@ class ResultsDialog(QDialog):
         
         current_position = 0
         for i, bar in enumerate(self.bars):
-            x_local = np.linspace(0, bar['L'], int(100 * bar['L'] / self.total_length))
+            # Увеличиваем количество точек для более гладких графиков
+            x_local = np.linspace(0, bar['L'], int(200 * bar['L'] / total_length))
             
             for x in x_local:
                 global_x = current_position + x
                 x_global.append(global_x)
                 
+                # Расчет по коэффициентам
                 Nx = self.N_coeffs[i][0] + x * self.N_coeffs[i][1]
                 Nx_values.append(Nx)
+                
                 sigma_values.append(Nx / bar['A'])
-                Ux_values.append(self.U_coeffs[i][0] + x * self.U_coeffs[i][1] + (x**2) * self.U_coeffs[i][2])
+                
+                # Расчет перемещений
+                Ux = (self.U_coeffs[i][0] + 
+                    x * self.U_coeffs[i][1] + 
+                    (x**2) * self.U_coeffs[i][2])
+                Ux_values.append(Ux)
             
             current_position += bar['L']
         
-        # Создание subplots
-        ax1 = self.fig.add_subplot(311)
-        ax2 = self.fig.add_subplot(312)
-        ax3 = self.fig.add_subplot(313)
+        # Устанавливаем одинаковые пределы по X для всех subplot
+        x_min = 0
+        x_max = total_length
+        
+        # Связываем оси X всех subplot
+        ax_scheme.set_xlim(x_min, x_max)
+        ax1.set_xlim(x_min, x_max)
+        ax2.set_xlim(x_min, x_max)
+        ax3.set_xlim(x_min, x_max)
         
         # Эпюра Nx
         ax1.plot(x_global, Nx_values, 'r-', linewidth=2)
-        ax1.set_title('Эпюра продольных сил Nx')
-        ax1.set_ylabel('Nx, Н')
-        ax1.grid(True)
+        ax1.set_title('Эпюра продольных сил Nx', fontsize=11, fontweight='bold')
+        ax1.set_ylabel('Nx, Н', fontsize=10)
+        ax1.grid(True, alpha=0.3)
         ax1.fill_between(x_global, Nx_values, alpha=0.3, color='red')
         
         # Эпюра σx
         ax2.plot(x_global, sigma_values, 'b-', linewidth=2)
-        ax2.set_title('Эпюра нормальных напряжений σx')
-        ax2.set_ylabel('σx, Па')
-        ax2.grid(True)
+        ax2.set_title('Эпюра нормальных напряжений σx', fontsize=11, fontweight='bold')
+        ax2.set_ylabel('σx, Па', fontsize=10)
+        ax2.grid(True, alpha=0.3)
         ax2.fill_between(x_global, sigma_values, alpha=0.3, color='blue')
         
         # Эпюра Ux
         ax3.plot(x_global, Ux_values, 'g-', linewidth=2)
-        ax3.set_title('Эпюра перемещений Ux')
-        ax3.set_ylabel('Ux, м')
-        ax3.set_xlabel('Длина конструкции, м')
-        ax3.grid(True)
+        ax3.set_title('Эпюра перемещений Ux', fontsize=11, fontweight='bold')
+        ax3.set_ylabel('Ux, м', fontsize=10)
+        ax3.set_xlabel('Длина конструкции, м', fontsize=10)
+        ax3.grid(True, alpha=0.3)
         ax3.fill_between(x_global, Ux_values, alpha=0.3, color='green')
+        
+        # Добавляем вертикальные линии от узлов схемы до всех эпюр
+        for pos in node_positions:
+            # Линия через все subplot
+            for ax in [ax_scheme, ax1, ax2, ax3]:
+                ax.axvline(x=pos, color='k', linestyle='-', alpha=0.5, linewidth=1)
+        
+        # Улучшаем читаемость подписей осей
+        for ax in [ax1, ax2, ax3]:
+            ax.tick_params(axis='both', which='major', labelsize=9)
+        
+        # Скрываем оси X для всех subplot кроме нижнего
+        ax_scheme.tick_params(axis='x', which='both', bottom=False, labelbottom=False)
+        ax1.tick_params(axis='x', which='both', bottom=False, labelbottom=False)
+        ax2.tick_params(axis='x', which='both', bottom=False, labelbottom=False)
         
         self.fig.tight_layout()
         self.canvas.draw()
-    
+        
     def calculate_tables(self):
         """Заполнение таблиц результатов для начальных и конечных точек стержней"""
         n_data = []

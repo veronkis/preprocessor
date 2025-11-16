@@ -27,58 +27,69 @@ class RodStructureProcessor:
             q = bar.get('q', 0)
             L = bar['L']
             if abs(q) > 0.0001:
-                Fe = q * L / 2
-                F[i] += Fe
-                F[i+1] += Fe
+                Fe1 = q * L / 2
+                Fe2 = q * L / 2
+                F[i] += Fe1
+                F[i+1] += Fe2
         return F
 
     def apply_supports(self, K, F):
         fixed = []
+        support_values = []
+        
         if self.supports:
             s = self.supports[0]['side']
             if s == "Слева":
                 fixed.append(0)
+                support_values.append(0.0)
             elif s == "Справа":
                 fixed.append(self.n_nodes - 1)
+                support_values.append(0.0)
             elif s == "Обе":
                 fixed.extend([0, self.n_nodes - 1])
-        for idx in fixed:
-            K[idx, :] = 0
-            K[:, idx] = 0
-            K[idx, idx] = 1
-            F[idx] = 0
-        return K, F
+                support_values.extend([0.0, 0.0])
+        
+        if fixed:
+            free_dofs = [i for i in range(self.n_nodes) if i not in fixed]
+            K_ff = K[np.ix_(free_dofs, free_dofs)]
+            F_f = F[free_dofs]
+            
+            # Решаем систему только для свободных степеней свободы
+            U_f = np.linalg.solve(K_ff, F_f)
+            
+            # Собираем полный вектор перемещений
+            U = np.zeros(self.n_nodes)
+            U[free_dofs] = U_f
+            U[fixed] = support_values
+            
+            return U
+        else:
+            return np.linalg.solve(K, F)
 
     def solve(self):
         K = self.assemble_global_K()
         F = self.assemble_global_F()
-        K, F = self.apply_supports(K, F)
-        try:
-            U = np.linalg.solve(K, F)
-        except np.linalg.LinAlgError as e:
-            raise RuntimeError(f"Невозможно решить систему: {e}")
+        U = self.apply_supports(K, F)
         return U
 
     def calculate_internal_forces_coefficients(self, U):
         """
-        Вычисление коэффициентов для продольных сил в стержнях
-        Возвращает список [N0, N1] для каждого стержня, где N(x) = N0 + N1*x
+        Правильный расчет коэффициентов для продольных сил
         """
         N_coeffs = []
         for i, bar in enumerate(self.bars):
             L, A, E = bar['L'], bar['A'], bar['E']
             q = bar.get('q', 0)
             
-            # Усилие от деформации
+            # Продольная сила от деформации
             delta_U = U[i+1] - U[i]
             N_elastic = (A * E / L) * delta_U
             
-            # Усилие от погонной нагрузки
-            N_q = q * L / 2
-            
-            # Коэффициенты для N(x) = N0 + N1*x
-            N0 = N_elastic - N_q  # Усилие в начале стержня
-            N1 = -q  # Производная от погонной нагрузки
+            # Продольная сила от погонной нагрузки
+            # Для стержня с погонной нагрузкой q:
+            # N(x) = N0 - q*x
+            N0 = N_elastic + (q * L / 2)
+            N1 = -q
             
             N_coeffs.append([N0, N1])
         
@@ -86,24 +97,71 @@ class RodStructureProcessor:
 
     def calculate_displacement_coefficients(self, U):
         """
-        Вычисление коэффициентов для перемещений в стержнях
-        Возвращает список [u0, u1, u2] для каждого стержня, где u(x) = u0 + u1*x + u2*x^2
+        ПРАВИЛЬНЫЙ расчет коэффициентов для перемещений
+        Основывается на точном решении дифференциального уравнения
         """
         U_coeffs = []
         for i, bar in enumerate(self.bars):
             L, A, E = bar['L'], bar['A'], bar['E']
             q = bar.get('q', 0)
             
-            # Коэффициенты для u(x)
-            u0 = U[i]  # Перемещение в начале стержня
+            # Узловые перемещения
+            u_i = U[i]      # Перемещение в начале стержня
+            u_j = U[i+1]    # Перемещение в конце стержня
             
-            # Линейная составляющая
-            delta_U = U[i+1] - U[i]
-            u1 = delta_U / L - (q * L) / (2 * A * E)
+            # Точное решение для стержня с погонной нагрузкой:
+            # u(x) = C1 + C2*x - (q*x²)/(2*E*A)
+            # Граничные условия:
+            # u(0) = u_i, u(L) = u_j
             
-            # Квадратичная составляющая от погонной нагрузки
-            u2 = q / (2 * A * E)
+            # Из u(0) = u_i => C1 = u_i
+            
+            # Из u(L) = u_j:
+            # u_j = u_i + C2*L - (q*L²)/(2*E*A)
+            # => C2 = (u_j - u_i)/L + (q*L)/(2*E*A)
+            
+            C1 = u_i
+            C2 = (u_j - u_i)/L + (q * L) / (2 * E * A)
+            
+            # Таким образом:
+            # u(x) = u_i + [(u_j - u_i)/L + (q*L)/(2*E*A)]*x - (q*x²)/(2*E*A)
+            
+            # Коэффициенты для представления u(x) = u0 + u1*x + u2*x²
+            u0 = C1                              # = u_i
+            u1 = C2                              # = (u_j - u_i)/L + (q*L)/(2*E*A)
+            u2 = -q / (2 * E * A)                # коэффициент при x²
             
             U_coeffs.append([u0, u1, u2])
         
         return U_coeffs
+
+    def calculate_element_results(self, U):
+        """
+        Дополнительный метод для расчета результатов по элементам
+        Аналогично рабочему процессору
+        """
+        element_results = []
+        for i, bar in enumerate(self.bars):
+            L, A, E = bar['L'], bar['A'], bar['E']
+            
+            # Перемещения узлов
+            u_i = U[i]
+            u_j = U[i+1]
+            
+            # Деформация
+            strain = (u_j - u_i) / L
+            
+            # Напряжение
+            stress = E * strain
+            
+            # Продольная сила (в середине стержня, без учета погонной нагрузки)
+            axial_force = stress * A
+            
+            element_results.append({
+                'element_id': i + 1,
+                'axial_force': axial_force,
+                'strain': strain,
+                'stress': stress
+            })
+        
+        return element_results
