@@ -358,8 +358,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка при отображении результатов: {e}")
 
-    # ... (остальные методы add_row, delete_row, toggle_grid, clear_all, update_visual, reset_zoom, save_project, load_project остаются без изменений)
-
     def add_row(self, table):
         row = table.rowCount()
         table.insertRow(row)

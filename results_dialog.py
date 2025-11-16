@@ -140,10 +140,11 @@ class ResultsDialog(QDialog):
     def setup_tab_tables(self):
         layout = QVBoxLayout()
         
-        # Создаем три группы для таблиц
+        # Создаем четыре группы для таблиц
         n_group = QGroupBox("Продольные силы Nx")
         sigma_group = QGroupBox("Нормальные напряжения σx")
         u_group = QGroupBox("Перемещения Ux")
+        detailed_group = QGroupBox("Детальные результаты по стержням")
         
         # Таблица продольных сил
         self.n_table = QTableWidget()
@@ -192,6 +193,39 @@ class ResultsDialog(QDialog):
         self.sigma_table.verticalHeader().setVisible(False)
         self.u_table.verticalHeader().setVisible(False)
         
+        # НОВАЯ ТАБЛИЦА: Детальные результаты по стержням
+        detailed_layout = QVBoxLayout()
+        
+        # Выбор стержня для детальной таблицы
+        detail_selection_layout = QHBoxLayout()
+        detail_selection_layout.addWidget(QLabel("Выберите стержень:"))
+        self.detail_bar_combo = QComboBox()
+        for i, bar in enumerate(self.bars):
+            self.detail_bar_combo.addItem(f"Стержень {i+1} (L={bar['L']} м)")
+        self.detail_bar_combo.currentIndexChanged.connect(self.update_detailed_table)
+        detail_selection_layout.addWidget(self.detail_bar_combo)
+        detail_selection_layout.addStretch()
+        
+        detailed_layout.addLayout(detail_selection_layout)
+        
+        # Таблица детальных результатов
+        self.detailed_table = QTableWidget()
+        self.detailed_table.setColumnCount(5)
+        self.detailed_table.setHorizontalHeaderLabels(["Индекс", "x, м", "Nx, Н", "σx, Па", "Ux, м"])
+        self.detailed_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        
+        # СИНИЙ ЦВЕТ ДЛЯ ЗАГОЛОВКОВ ТАБЛИЦЫ
+        self.detailed_table.horizontalHeader().setStyleSheet(
+            "QHeaderView::section { background-color: #2E5CB8; color: white; font-weight: bold; }"
+        )
+        
+        self.detailed_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.detailed_table.setSelectionMode(QTableWidget.NoSelection)
+        self.detailed_table.verticalHeader().setVisible(False)
+        
+        detailed_layout.addWidget(self.detailed_table)
+        detailed_group.setLayout(detailed_layout)
+        
         # Располагаем таблицы в группах
         n_layout = QVBoxLayout()
         n_layout.addWidget(self.n_table)
@@ -209,8 +243,52 @@ class ResultsDialog(QDialog):
         layout.addWidget(n_group)
         layout.addWidget(sigma_group)
         layout.addWidget(u_group)
+        layout.addWidget(detailed_group)  # Добавляем новую группу
         
         self.tab_tables.setLayout(layout)
+    
+    def update_detailed_table(self):
+        """Обновление детальной таблицы при выборе стержня"""
+        bar_idx = self.detail_bar_combo.currentIndex()
+        if bar_idx < 0 or bar_idx >= len(self.bars):
+            return
+            
+        bar = self.bars[bar_idx]
+        L = bar['L']
+        A = bar['A']
+        
+        # Создаем точки с шагом 0.1 м
+        step = 0.1
+        x_points = np.arange(0, L + step, step)
+        # Убедимся, что последняя точка точно равна L
+        if x_points[-1] > L:
+            x_points[-1] = L
+        elif x_points[-1] < L:
+            x_points = np.append(x_points, L)
+        
+        # Создаем данные для таблицы
+        self.detailed_table.setRowCount(len(x_points))
+        
+        for i, x in enumerate(x_points):
+            # Расчет компонент НДС
+            Nx = self.N_coeffs[bar_idx][0] + x * self.N_coeffs[bar_idx][1]
+            sigma_x = Nx / A
+            Ux = (self.U_coeffs[bar_idx][0] + 
+                  x * self.U_coeffs[bar_idx][1] + 
+                  (x**2) * self.U_coeffs[bar_idx][2])
+            
+            # Заполняем строку таблицы
+            self.detailed_table.setItem(i, 0, QTableWidgetItem(str(i)))
+            self.detailed_table.setItem(i, 1, QTableWidgetItem(f"{x:.4f}"))
+            self.detailed_table.setItem(i, 2, QTableWidgetItem(f"{Nx:.4f}"))
+            self.detailed_table.setItem(i, 3, QTableWidgetItem(f"{sigma_x:.4f}"))
+            self.detailed_table.setItem(i, 4, QTableWidgetItem(f"{Ux:.8f}"))
+            
+            # Делаем все ячейки нередактируемыми
+            for col in range(5):
+                item = self.detailed_table.item(i, col)
+                if item:
+                    item.setFlags(item.flags() & ~Qt.ItemIsEditable)
     
     def setup_tab_section(self):
         layout = QVBoxLayout()
@@ -365,6 +443,7 @@ class ResultsDialog(QDialog):
         """Расчет всех результатов для отображения"""
         self.calculate_plots()
         self.calculate_tables()
+        self.update_detailed_table()  # Инициализируем детальную таблицу
     
     def calculate_plots(self):
         """Расчет и отображение графиков эпюр со схемой стержневой системы"""
@@ -638,4 +717,3 @@ class ResultsDialog(QDialog):
             
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка при сохранении отчёта:\n{e}")
-
