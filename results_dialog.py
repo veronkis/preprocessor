@@ -95,28 +95,30 @@ class ResultsDialog(QDialog):
         self.delta_table.setColumnCount(3)
         self.delta_table.setHorizontalHeaderLabels(["Узел", "Перемещение Δ, м", "Перемещение Δ, мм"])
         self.delta_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+
+        # УБИРАЕМ НУМЕРАЦИЮ СТРОК (вертикальные заголовки)
+        self.delta_table.verticalHeader().setVisible(False)
+        
+        # ДЕЛАЕМ ТАБЛИЦУ НЕРЕДАКТИРУЕМОЙ
+        self.delta_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.delta_table.setSelectionMode(QTableWidget.NoSelection)
         
         for i, displacement in enumerate(self.U):
             self.delta_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            self.delta_table.setItem(i, 1, QTableWidgetItem(f"{displacement:.6e}"))
+            # Убрана экспоненциальная форма
+            self.delta_table.setItem(i, 1, QTableWidgetItem(f"{displacement:.8f}"))
             self.delta_table.setItem(i, 2, QTableWidgetItem(f"{displacement * 1000:.6f}"))
+            
+            # Делаем все ячейки нередактируемыми
+            for col in range(3):
+                item = self.delta_table.item(i, col)
+                if item:
+                    item.setFlags(item.flags() & ~Qt.ItemIsEditable)
         
         layout.addWidget(QLabel("Перемещения узлов конструкции:"))
         layout.addWidget(self.delta_table)
         
-        # Анализ перемещений
-        max_disp = np.max(self.U)
-        min_disp = np.min(self.U)
-        # ИСПРАВЛЕНИЕ: используем np.argmax и np.argmin для numpy array
-        max_node = np.argmax(self.U) + 1
-        min_node = np.argmin(self.U) + 1
-        
-        analysis_label = QLabel(
-            f"Максимальное перемещение: узел {max_node}, Δ = {max_disp:.6e} м ({max_disp * 1000:.3f} мм)\n"
-            f"Минимальное перемещение: узел {min_node}, Δ = {min_disp:.6e} м ({min_disp * 1000:.3f} мм)"
-        )
-        analysis_label.setStyleSheet("background-color: #e6f3ff; padding: 8px; border: 1px solid #ccc;")
-        layout.addWidget(analysis_label)
+        # УБРАН БЛОК С АНАЛИЗОМ ПЕРЕМЕЩЕНИЙ (максимальное и минимальное)
         
         self.tab_deltas.setLayout(layout)
     
@@ -143,6 +145,10 @@ class ResultsDialog(QDialog):
             "Nx, Н", "σx, Па", "Ux, м"
         ])
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        
+        # ДЕЛАЕМ ТАБЛИЦУ НЕРЕДАКТИРУЕМОЙ
+        self.results_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.results_table.setSelectionMode(QTableWidget.NoSelection)
         
         layout.addWidget(QLabel("Подробные результаты по сечениям (по 8 точек на каждый стержень):"))
         layout.addWidget(self.results_table)
@@ -258,7 +264,7 @@ class ResultsDialog(QDialog):
         ax1.grid(True)
         ax1.fill_between(x_global, Nx_values, alpha=0.3, color='red')
         
-        # Эпюra σx
+        # Эпюра σx
         ax2.plot(x_global, sigma_values, 'b-', linewidth=2)
         ax2.set_title('Эпюра нормальных напряжений σx')
         ax2.set_ylabel('σx, Па')
@@ -296,13 +302,17 @@ class ResultsDialog(QDialog):
                     f"{x_local:.4f}",
                     f"{Nx:.4f}",
                     f"{sigma_x:.4f}",
-                    f"{Ux:.6e}"
+                    # ИЗМЕНЕНО: убрана экспоненциальная форма
+                    f"{Ux:.8f}"
                 ])
         
         self.results_table.setRowCount(len(results))
         for row, data in enumerate(results):
             for col, value in enumerate(data):
-                self.results_table.setItem(row, col, QTableWidgetItem(value))
+                item = QTableWidgetItem(value)
+                # ДЕЛАЕМ ЯЧЕЙКУ НЕРЕДАКТИРУЕМОЙ
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                self.results_table.setItem(row, col, item)
     
     def calculate_section(self):
         """Расчет результатов в конкретном сечении по локальной координате"""
@@ -317,7 +327,7 @@ class ResultsDialog(QDialog):
             
             if x_local < 0 or x_local > bar['L']:
                 QMessageBox.warning(self, "Ошибка", 
-                                  f"Локальная координата должна быть в диапазоне [0, {bar['L']:.2f}] м")
+                                f"Локальная координата должна быть в диапазоне [0, {bar['L']:.2f}] м")
                 return
                 
         except ValueError:
@@ -338,7 +348,8 @@ class ResultsDialog(QDialog):
         self.section_global_coord.setText(f"{x_global:.4f}")
         self.section_Nx.setText(f"{Nx:.4f}")
         self.section_sigma.setText(f"{sigma_x:.4f}")
-        self.section_Ux.setText(f"{Ux:.6e}")
+        # ИЗМЕНЕНО: убрана экспоненциальная форма
+        self.section_Ux.setText(f"{Ux:.8f}")
     
     def save_report(self):
         """Сохранение полного отчёта"""
@@ -369,7 +380,8 @@ class ResultsDialog(QDialog):
                         'Локальная координата, м': x_local,
                         'Nx, Н': Nx,
                         'σx, Па': sigma_x,
-                        'Ux, м': Ux
+                        # ИЗМЕНЕНО: убрана экспоненциальная форма
+                        'Ux, м': f"{Ux:.8f}"
                     })
             
             df = pd.DataFrame(results_data)
@@ -379,8 +391,9 @@ class ResultsDialog(QDialog):
             for i, u in enumerate(self.U):
                 nodes_data.append({
                     'Узел': i + 1,
-                    'Перемещение Δ, м': u,
-                    'Перемещение Δ, мм': u * 1000
+                    # ИЗМЕНЕНО: убрана экспоненциальная форма
+                    'Перемещение Δ, м': f"{u:.8f}",
+                    'Перемещение Δ, мм': f"{u * 1000:.6f}"
                 })
             df_nodes = pd.DataFrame(nodes_data)
             
@@ -395,12 +408,12 @@ class ResultsDialog(QDialog):
                 # Анализ результатов
                 max_disp = np.max(self.U)
                 min_disp = np.min(self.U)
-                # ИСПРАВЛЕНИЕ: используем np.argmax и np.argmin для numpy array
                 max_node = np.argmax(self.U) + 1
                 min_node = np.argmin(self.U) + 1
                 
-                f.write(f"Максимальное перемещение: узел {max_node}, Δ = {max_disp:.6e} м\n")
-                f.write(f"Минимальное перемещение: узел {min_node}, Δ = {min_disp:.6e} м\n")
+                # ИЗМЕНЕНО: убрана экспоненциальная форма
+                f.write(f"Максимальное перемещение: узел {max_node}, Δ = {max_disp:.8f} м\n")
+                f.write(f"Минимальное перемещение: узел {min_node}, Δ = {min_disp:.8f} м\n")
                 f.write("=====================================\n\n")
                 
                 f.write("ПЕРЕМЕЩЕНИЯ УЗЛОВ:\n")
