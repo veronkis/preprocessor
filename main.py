@@ -194,13 +194,15 @@ class MainWindow(QMainWindow):
         self.resize(1400,600)
         self.setStyleSheet("background-color: #d4b483;")
         self.statusBar().showMessage("Готово")
-        self.current_U = None  # Сохраняем последний рассчитанный вектор перемещений
-        self.N_coeffs = None   # Коэффициенты для продольных сил
-        self.U_coeffs = None   # Коэффициенты для перемещений
 
         self.bars = []
         self.supports = []
         self.node_forces = []
+        
+        # Атрибуты для результатов
+        self.current_U = None
+        self.N_coeffs = None
+        self.U_coeffs = None
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -209,15 +211,6 @@ class MainWindow(QMainWindow):
         right_panel = QVBoxLayout()
         main_layout.addLayout(left_panel,1)
         main_layout.addLayout(right_panel,2)
-
-        postprocessor_layout = QHBoxLayout()
-        
-        postproc_btn = QPushButton("📊 Результаты расчёта")
-        postproc_btn.setStyleSheet("background-color: #ffcc99; font-weight:bold; border:1px solid #888; padding:4px")
-        postproc_btn.clicked.connect(self.show_results)
-        postprocessor_layout.addWidget(postproc_btn)
-        
-        left_panel.addLayout(postprocessor_layout)
 
         # ------------------------
         # Таблицы с кнопками
@@ -277,6 +270,14 @@ class MainWindow(QMainWindow):
         reset_zoom_btn.clicked.connect(self.reset_zoom)
         left_panel.addWidget(reset_zoom_btn)
 
+        # ------------------------
+        # ОБЪЕДИНЕННАЯ КНОПКА РАСЧЕТА И ПОКАЗА РЕЗУЛЬТАТОВ
+        # ------------------------
+        self.calc_results_btn = QPushButton("⚡ Рассчитать и показать результаты")
+        self.calc_results_btn.setStyleSheet("background-color: #a2d4a2; font-weight:bold; border:2px solid #555; padding:8px; font-size: 14px;")
+        self.calc_results_btn.clicked.connect(self.calculate_and_show_results)
+        left_panel.addWidget(self.calc_results_btn)
+
         left_panel.addStretch()
 
         # Строка для отображения ошибок (внизу левой панели)
@@ -288,21 +289,6 @@ class MainWindow(QMainWindow):
         # Холст
         self.canvas = StructureCanvas(self.bars,self.supports,self.node_forces)
         right_panel.addWidget(self.canvas)
-
-        # ------------------------
-        # Кнопка расчёта перемещений Δ
-        # ------------------------
-        calc_btn = QPushButton("⚡ Рассчитать Δ узлов")
-        calc_btn.setStyleSheet("background-color: #a2d4a2; font-weight:bold; border:1px solid #888; padding:4px")
-        calc_btn.clicked.connect(self.calculate_deltas)
-        left_panel.addWidget(calc_btn)
-
-        # Поле для вывода Δ
-        self.delta_label = QLabel("")
-        self.delta_label.setStyleSheet("background-color: #fff; border:1px solid #888; padding:4px;")
-        self.delta_label.setWordWrap(True)
-        left_panel.addWidget(self.delta_label)
-
 
         # Сигналы
         self.bar_table.cellChanged.connect(self.update_visual)
@@ -318,16 +304,6 @@ class MainWindow(QMainWindow):
         save_action.triggered.connect(self.save_project)
         load_action.triggered.connect(self.load_project)
 
-        postproc_menu = menubar.addMenu("Постпроцессор")
-
-        postproc_action = QAction("Запустить постпроцессор", self)
-        postproc_action.triggered.connect(self.run_postprocessor)
-        postproc_menu.addAction(postproc_action)
-
-        report_action = QAction("Сгенерировать отчёт", self)
-        report_action.triggered.connect(self.generate_report)
-        postproc_menu.addAction(report_action)
-
         # Меню "Вид"
         view_menu = menubar.addMenu("Вид")
         self.grid_action = QAction("Показывать сетку", self, checkable=True)
@@ -335,25 +311,35 @@ class MainWindow(QMainWindow):
         self.grid_action.triggered.connect(self.toggle_grid)
         view_menu.addAction(self.grid_action)
 
-    def calculate_deltas(self):
+    def calculate_and_show_results(self):
+        """Объединенная функция расчета и показа результатов"""
         if not self.bars:
-            self.delta_label.setText("Нет данных для расчёта Δ: отсутствуют стержни")
+            QMessageBox.warning(self, "Ошибка", "Нет данных для расчёта: отсутствуют стержни")
             return
+        
         try:
+            # Показываем сообщение о начале расчета
+            self.statusBar().showMessage("Выполняется расчёт...")
+            QApplication.processEvents()  # Обновляем интерфейс
+            
+            # Выполняем расчет
             processor = RodStructureProcessor(self.bars, self.node_forces, self.supports)
             delta = processor.solve()
-            delta_str = ", ".join([f"{d:.6f}" for d in delta])
-            self.delta_label.setText(f"Δ узлов: [{delta_str}]")
-            self.statusBar().showMessage("Расчёт Δ выполнен успешно")
             
-            # СОХРАНИТЕ РЕЗУЛЬТАТЫ ДЛЯ ПОСТПРОЦЕССОРА
+            # Сохраняем результаты для постпроцессора
             self.current_U = delta
             self.N_coeffs = processor.calculate_internal_forces_coefficients(delta)
             self.U_coeffs = processor.calculate_displacement_coefficients(delta)
             
+            # Показываем успешное сообщение
+            self.statusBar().showMessage("Расчёт выполнен успешно")
+            
+            # Сразу открываем окно с результатами
+            self.show_results()
+            
         except Exception as e:
-            self.delta_label.setText(f"Ошибка расчёта Δ: {e}")
-            self.statusBar().showMessage("Ошибка при расчёте Δ")
+            self.statusBar().showMessage("Ошибка при расчёте")
+            QMessageBox.critical(self, "Ошибка расчёта", f"Не удалось выполнить расчёт:\n{str(e)}")
             self.current_U = None
             self.N_coeffs = None
             self.U_coeffs = None
@@ -361,7 +347,7 @@ class MainWindow(QMainWindow):
     def show_results(self):
         """Показ модального окна с результатами"""
         if self.current_U is None or self.N_coeffs is None or self.U_coeffs is None:
-            QMessageBox.warning(self, "Ошибка", "Сначала выполните расчёт Δ узлов!")
+            QMessageBox.warning(self, "Ошибка", "Сначала выполните расчёт!")
             return
         
         try:
@@ -372,51 +358,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка при отображении результатов: {e}")
 
-    def run_postprocessor(self):
-        """Запуск постпроцессора"""
-        if self.current_U is None or self.N_coeffs is None or self.U_coeffs is None:
-            QMessageBox.warning(self, "Ошибка", "Сначала выполните расчёт Δ узлов!")
-            return
-        
-        try:
-            # Создаём постпроцессор
-            postprocessor = PostProcessor(self.bars, self.N_coeffs, self.U_coeffs)
-            
-            # Показываем таблицу результатов
-            postprocessor.display_results_table()
-            
-            # Строим эпюры
-            postprocessor.plot_epures()
-            
-            # Анализируем результаты
-            analysis = postprocessor.analyze_results()
-            
-            # Проверяем прочность
-            strength_results = postprocessor.check_strength(self.bars)
-            
-            # Сохраняем для генерации отчёта
-            self.current_postprocessor = postprocessor
-            
-            self.statusBar().showMessage("Постпроцессор выполнен успешно")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Ошибка в постпроцессоре: {e}")
+    # ... (остальные методы add_row, delete_row, toggle_grid, clear_all, update_visual, reset_zoom, save_project, load_project остаются без изменений)
 
-    def generate_report(self):
-        """Генерация полного отчёта"""
-        if not hasattr(self, 'current_postprocessor') or self.current_postprocessor is None:
-            QMessageBox.warning(self, "Ошибка", "Сначала выполните расчёт постпроцессора!")
-            return
-        
-        try:
-            self.current_postprocessor.generate_report(self)
-            self.statusBar().showMessage("Отчёт успешно сгенерирован")
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Ошибка при генерации отчёта: {e}")
-
-    # ------------------------
-    # Добавление/удаление строк
-    # ------------------------
     def add_row(self, table):
         row = table.rowCount()
         table.insertRow(row)
@@ -430,24 +373,16 @@ class MainWindow(QMainWindow):
             table.removeRow(r.row())
         self.update_visual()
 
-    # ------------------------
-    # Сетка
-    # ------------------------
     def toggle_grid(self):
         self.canvas.show_grid = not self.canvas.show_grid
         self.canvas.update()
-        # синхронизируем галочку в меню
         self.grid_action.setChecked(self.canvas.show_grid)
 
-    # ------------------------
-    # Очистка всех данных
-    # ------------------------
     def clear_all(self):
         for table in [self.bar_table, self.node_table, self.bar_load_table]:
             table.setRowCount(0)
         self.supp_combo.setCurrentIndex(0)
     
-        # Проверяем сетку через меню
         self.grid_action.setChecked(True)
         self.canvas.show_grid = True
 
@@ -457,22 +392,18 @@ class MainWindow(QMainWindow):
         self.bars = []
         self.supports = []
         self.node_forces = []
+        self.current_U = None
+        self.N_coeffs = None
+        self.U_coeffs = None
 
         # Обнуляем данные холста
         self.canvas.bars = []
         self.canvas.supports = []
         self.canvas.node_forces = []
-        self.canvas.zoom_factor = 1.0  # сброс масштаба
+        self.canvas.zoom_factor = 1.0
         self.canvas.update()
 
-        self.current_U = None
-        self.N_coeffs = None
-        self.U_coeffs = None
-        if hasattr(self, 'current_postprocessor'):
-            self.current_postprocessor = None
-
         self.statusBar().showMessage("Проект очищен")
-
 
     # ------------------------
     # Обновление визуализации

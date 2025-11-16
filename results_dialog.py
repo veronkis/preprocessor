@@ -20,15 +20,24 @@ class ResultsDialog(QDialog):
         self.U_coeffs = U_coeffs
         self.total_length = sum(bar['L'] for bar in bars)
         
-        self.setWindowTitle("Результаты расчёта")
+        self.setWindowTitle("Результаты расчёта стержневой системы")
         self.setModal(True)
         self.resize(1200, 800)
         
         self.init_ui()
         self.calculate_all_results()
         
+        # АВТОМАТИЧЕСКИ ПЕРЕХОДИМ НА ВКЛАДКУ С ПЕРЕМЕЩЕНИЯМИ УЗЛОВ
+        self.tabs.setCurrentIndex(0)
+        
     def init_ui(self):
         layout = QVBoxLayout()
+        
+        # Заголовок
+        title_label = QLabel("Результаты расчёта напряжённо-деформированного состояния")
+        title_label.setStyleSheet("font-weight: bold; font-size: 14px; padding: 10px;")
+        title_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title_label)
         
         # Создаем вкладки
         self.tabs = QTabWidget()
@@ -36,30 +45,33 @@ class ResultsDialog(QDialog):
         # Вкладка 1: Таблица перемещений узлов (Δ)
         self.tab_deltas = QWidget()
         self.setup_tab_deltas()
-        self.tabs.addTab(self.tab_deltas, "Перемещения узлов")
+        self.tabs.addTab(self.tab_deltas, "📊 Перемещения узлов")
         
         # Вкладка 2: Графики
         self.tab_plots = QWidget()
         self.setup_tab_plots()
-        self.tabs.addTab(self.tab_plots, "Графики")
+        self.tabs.addTab(self.tab_plots, "📈 Эпюры")
         
         # Вкладка 3: Таблицы результатов
         self.tab_tables = QWidget()
         self.setup_tab_tables()
-        self.tabs.addTab(self.tab_tables, "Таблицы результатов")
+        self.tabs.addTab(self.tab_tables, "📋 Таблицы результатов")
         
-        # Вкладка 4: Результаты в сечении (ИЗМЕНЕНА)
+        # Вкладка 4: Результаты в сечении
         self.tab_section = QWidget()
         self.setup_tab_section()
-        self.tabs.addTab(self.tab_section, "Результаты в сечении")
+        self.tabs.addTab(self.tab_section, "📍 Результаты в сечении")
         
         layout.addWidget(self.tabs)
         
         # Кнопки внизу
         button_layout = QHBoxLayout()
-        self.save_btn = QPushButton("Сохранить отчёт")
+        self.save_btn = QPushButton("💾 Сохранить отчёт")
+        self.save_btn.setStyleSheet("background-color: #a2d4a2; font-weight:bold; padding:6px")
         self.save_btn.clicked.connect(self.save_report)
-        self.close_btn = QPushButton("Закрыть")
+        
+        self.close_btn = QPushButton("❌ Закрыть")
+        self.close_btn.setStyleSheet("background-color: #ffaaaa; font-weight:bold; padding:6px")
         self.close_btn.clicked.connect(self.accept)
         
         button_layout.addWidget(self.save_btn)
@@ -72,19 +84,39 @@ class ResultsDialog(QDialog):
     def setup_tab_deltas(self):
         layout = QVBoxLayout()
         
+        # Информация о системе
+        info_label = QLabel(f"Конструкция состоит из {len(self.bars)} стержней и {len(self.U)} узлов")
+        info_label.setStyleSheet("font-weight: bold; padding: 5px;")
+        layout.addWidget(info_label)
+        
         # Таблица перемещений узлов
         self.delta_table = QTableWidget()
         self.delta_table.setRowCount(len(self.U))
-        self.delta_table.setColumnCount(2)
-        self.delta_table.setHorizontalHeaderLabels(["Узел", "Перемещение Δ, м"])
+        self.delta_table.setColumnCount(3)
+        self.delta_table.setHorizontalHeaderLabels(["Узел", "Перемещение Δ, м", "Перемещение Δ, мм"])
         self.delta_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         
         for i, displacement in enumerate(self.U):
             self.delta_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
             self.delta_table.setItem(i, 1, QTableWidgetItem(f"{displacement:.6e}"))
+            self.delta_table.setItem(i, 2, QTableWidgetItem(f"{displacement * 1000:.6f}"))
         
         layout.addWidget(QLabel("Перемещения узлов конструкции:"))
         layout.addWidget(self.delta_table)
+        
+        # Анализ перемещений
+        max_disp = np.max(self.U)
+        min_disp = np.min(self.U)
+        # ИСПРАВЛЕНИЕ: используем np.argmax и np.argmin для numpy array
+        max_node = np.argmax(self.U) + 1
+        min_node = np.argmin(self.U) + 1
+        
+        analysis_label = QLabel(
+            f"Максимальное перемещение: узел {max_node}, Δ = {max_disp:.6e} м ({max_disp * 1000:.3f} мм)\n"
+            f"Минимальное перемещение: узел {min_node}, Δ = {min_disp:.6e} м ({min_disp * 1000:.3f} мм)"
+        )
+        analysis_label.setStyleSheet("background-color: #e6f3ff; padding: 8px; border: 1px solid #ccc;")
+        layout.addWidget(analysis_label)
         
         self.tab_deltas.setLayout(layout)
     
@@ -95,7 +127,9 @@ class ResultsDialog(QDialog):
         self.fig = Figure(figsize=(10, 8))
         self.canvas = FigureCanvas(self.fig)
         
+        layout.addWidget(QLabel("Эпюры компонент напряжённо-деформированного состояния:"))
         layout.addWidget(self.canvas)
+        
         self.tab_plots.setLayout(layout)
     
     def setup_tab_tables(self):
@@ -110,7 +144,7 @@ class ResultsDialog(QDialog):
         ])
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         
-        layout.addWidget(QLabel("Подробные результаты по сечениям:"))
+        layout.addWidget(QLabel("Подробные результаты по сечениям (по 8 точек на каждый стержень):"))
         layout.addWidget(self.results_table)
         
         self.tab_tables.setLayout(layout)
@@ -132,7 +166,8 @@ class ResultsDialog(QDialog):
         self.local_coord_input.setPlaceholderText(f"0 - {self.bars[0]['L']:.2f} м")
         
         # Кнопка расчета
-        self.calc_btn = QPushButton("Рассчитать в сечении")
+        self.calc_btn = QPushButton("🔍 Рассчитать в сечении")
+        self.calc_btn.setStyleSheet("background-color: #a2d4a2; font-weight:bold; padding:4px")
         self.calc_btn.clicked.connect(self.calculate_section)
         
         input_layout.addRow("Элемент:", self.element_combo)
@@ -153,6 +188,11 @@ class ResultsDialog(QDialog):
         self.section_Nx = QLabel("-")
         self.section_sigma = QLabel("-")
         self.section_Ux = QLabel("-")
+        
+        # Установим стили для результатов
+        for label in [self.section_element, self.section_local_coord, self.section_global_coord, 
+                     self.section_Nx, self.section_sigma, self.section_Ux]:
+            label.setStyleSheet("background-color: #f0f0f0; padding: 4px; border: 1px solid #ccc;")
         
         results_layout.addRow("Элемент:", self.section_element)
         results_layout.addRow("Локальная координата, м:", self.section_local_coord)
@@ -218,7 +258,7 @@ class ResultsDialog(QDialog):
         ax1.grid(True)
         ax1.fill_between(x_global, Nx_values, alpha=0.3, color='red')
         
-        # Эпюра σx
+        # Эпюra σx
         ax2.plot(x_global, sigma_values, 'b-', linewidth=2)
         ax2.set_title('Эпюра нормальных напряжений σx')
         ax2.set_ylabel('σx, Па')
@@ -339,7 +379,8 @@ class ResultsDialog(QDialog):
             for i, u in enumerate(self.U):
                 nodes_data.append({
                     'Узел': i + 1,
-                    'Перемещение Δ, м': u
+                    'Перемещение Δ, м': u,
+                    'Перемещение Δ, мм': u * 1000
                 })
             df_nodes = pd.DataFrame(nodes_data)
             
@@ -350,6 +391,16 @@ class ResultsDialog(QDialog):
                 f.write(f"Количество элементов: {len(self.bars)}\n")
                 f.write(f"Общая длина конструкции: {self.total_length:.4f} м\n")
                 f.write(f"Количество узлов: {len(self.U)}\n")
+                
+                # Анализ результатов
+                max_disp = np.max(self.U)
+                min_disp = np.min(self.U)
+                # ИСПРАВЛЕНИЕ: используем np.argmax и np.argmin для numpy array
+                max_node = np.argmax(self.U) + 1
+                min_node = np.argmin(self.U) + 1
+                
+                f.write(f"Максимальное перемещение: узел {max_node}, Δ = {max_disp:.6e} м\n")
+                f.write(f"Минимальное перемещение: узел {min_node}, Δ = {min_disp:.6e} м\n")
                 f.write("=====================================\n\n")
                 
                 f.write("ПЕРЕМЕЩЕНИЯ УЗЛОВ:\n")
