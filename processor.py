@@ -59,7 +59,6 @@ class RodStructureProcessor:
             raise RuntimeError(f"Невозможно решить систему: {e}")
         return U
 
-    # НОВЫЕ МЕТОДЫ ДЛЯ ПОСТПРОЦЕССОРА
     def calculate_internal_forces_coefficients(self, U):
         """
         Вычисление коэффициентов для продольных сил в стержнях
@@ -78,7 +77,7 @@ class RodStructureProcessor:
             N_q = q * L / 2
             
             # Коэффициенты для N(x) = N0 + N1*x
-            N0 = N_elastic + N_q  # Усилие в начале стержня
+            N0 = N_elastic - N_q  # Усилие в начале стержня
             N1 = -q  # Производная от погонной нагрузки
             
             N_coeffs.append([N0, N1])
@@ -100,10 +99,10 @@ class RodStructureProcessor:
             
             # Линейная составляющая
             delta_U = U[i+1] - U[i]
-            u1 = delta_U / L + (q * L) / (2 * A * E)
+            u1 = delta_U / L - (q * L) / (2 * A * E)
             
             # Квадратичная составляющая от погонной нагрузки
-            u2 = -q / (2 * A * E)
+            u2 = q / (2 * A * E)
             
             U_coeffs.append([u0, u1, u2])
         

@@ -9,6 +9,7 @@ from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QAction
 from PySide6.QtCore import Qt, QRectF
 from processor import RodStructureProcessor
 from postprocessor import PostProcessor 
+from results_dialog import ResultsDialog
 
 # ------------------------
 # Холст для рисования
@@ -211,15 +212,10 @@ class MainWindow(QMainWindow):
 
         postprocessor_layout = QHBoxLayout()
         
-        postproc_btn = QPushButton("📊 Постпроцессор")
+        postproc_btn = QPushButton("📊 Результаты расчёта")
         postproc_btn.setStyleSheet("background-color: #ffcc99; font-weight:bold; border:1px solid #888; padding:4px")
-        postproc_btn.clicked.connect(self.run_postprocessor)
+        postproc_btn.clicked.connect(self.show_results)
         postprocessor_layout.addWidget(postproc_btn)
-        
-        report_btn = QPushButton("📋 Отчёт")
-        report_btn.setStyleSheet("background-color: #ccffcc; font-weight:bold; border:1px solid #888; padding:4px")
-        report_btn.clicked.connect(self.generate_report)
-        postprocessor_layout.addWidget(report_btn)
         
         left_panel.addLayout(postprocessor_layout)
 
@@ -361,6 +357,20 @@ class MainWindow(QMainWindow):
             self.current_U = None
             self.N_coeffs = None
             self.U_coeffs = None
+
+    def show_results(self):
+        """Показ модального окна с результатами"""
+        if self.current_U is None or self.N_coeffs is None or self.U_coeffs is None:
+            QMessageBox.warning(self, "Ошибка", "Сначала выполните расчёт Δ узлов!")
+            return
+        
+        try:
+            # Создаем и показываем модальное окно с результатами
+            results_dialog = ResultsDialog(self.bars, self.current_U, self.N_coeffs, self.U_coeffs, self)
+            results_dialog.exec()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка при отображении результатов: {e}")
 
     def run_postprocessor(self):
         """Запуск постпроцессора"""
