@@ -95,7 +95,12 @@ class ResultsDialog(QDialog):
         self.delta_table.setColumnCount(3)
         self.delta_table.setHorizontalHeaderLabels(["Узел", "Перемещение Δ, м", "Перемещение Δ, мм"])
         self.delta_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-
+        
+        # СИНИЙ ЦВЕТ ДЛЯ ЗАГОЛОВКОВ ТАБЛИЦЫ
+        self.delta_table.horizontalHeader().setStyleSheet(
+            "QHeaderView::section { background-color: #2E5CB8; color: white; font-weight: bold; }"
+        )
+        
         # УБИРАЕМ НУМЕРАЦИЮ СТРОК (вертикальные заголовки)
         self.delta_table.verticalHeader().setVisible(False)
         
@@ -118,8 +123,6 @@ class ResultsDialog(QDialog):
         layout.addWidget(QLabel("Перемещения узлов конструкции:"))
         layout.addWidget(self.delta_table)
         
-        # УБРАН БЛОК С АНАЛИЗОМ ПЕРЕМЕЩЕНИЙ (максимальное и минимальное)
-        
         self.tab_deltas.setLayout(layout)
     
     def setup_tab_plots(self):
@@ -137,21 +140,75 @@ class ResultsDialog(QDialog):
     def setup_tab_tables(self):
         layout = QVBoxLayout()
         
-        # Создаем таблицы для Nx, σx, Ux
-        self.results_table = QTableWidget()
-        self.results_table.setColumnCount(6)
-        self.results_table.setHorizontalHeaderLabels([
-            "Глобальная координата, м", "Элемент", "Локальная координата, м", 
-            "Nx, Н", "σx, Па", "Ux, м"
-        ])
-        self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # Создаем три группы для таблиц
+        n_group = QGroupBox("Продольные силы Nx")
+        sigma_group = QGroupBox("Нормальные напряжения σx")
+        u_group = QGroupBox("Перемещения Ux")
         
-        # ДЕЛАЕМ ТАБЛИЦУ НЕРЕДАКТИРУЕМОЙ
-        self.results_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.results_table.setSelectionMode(QTableWidget.NoSelection)
+        # Таблица продольных сил
+        self.n_table = QTableWidget()
+        self.n_table.setColumnCount(3)
+        self.n_table.setHorizontalHeaderLabels(["Номер стержня", "Nx в начале стержня, Н", "Nx в конце стержня, Н"])
+        self.n_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         
-        layout.addWidget(QLabel("Подробные результаты по сечениям (по 8 точек на каждый стержень):"))
-        layout.addWidget(self.results_table)
+        # СИНИЙ ЦВЕТ ДЛЯ ЗАГОЛОВКОВ ТАБЛИЦЫ
+        self.n_table.horizontalHeader().setStyleSheet(
+            "QHeaderView::section { background-color: #2E5CB8; color: white; font-weight: bold; }"
+        )
+        
+        self.n_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.n_table.setSelectionMode(QTableWidget.NoSelection)
+        
+        # Таблица напряжений
+        self.sigma_table = QTableWidget()
+        self.sigma_table.setColumnCount(4)
+        self.sigma_table.setHorizontalHeaderLabels(["Номер стержня", "σx в начале стержня, Па", "σx в конце стержня, Па", "Допустимое напряжение, Па"])
+        self.sigma_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        
+        # СИНИЙ ЦВЕТ ДЛЯ ЗАГОЛОВКОВ ТАБЛИЦЫ
+        self.sigma_table.horizontalHeader().setStyleSheet(
+            "QHeaderView::section { background-color: #2E5CB8; color: white; font-weight: bold; }"
+        )
+        
+        self.sigma_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.sigma_table.setSelectionMode(QTableWidget.NoSelection)
+        
+        # Таблица перемещений
+        self.u_table = QTableWidget()
+        self.u_table.setColumnCount(3)
+        self.u_table.setHorizontalHeaderLabels(["Номер стержня", "Ux в начале стержня, м", "Ux в конце стержня, м"])
+        self.u_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        
+        # СИНИЙ ЦВЕТ ДЛЯ ЗАГОЛОВКОВ ТАБЛИЦЫ
+        self.u_table.horizontalHeader().setStyleSheet(
+            "QHeaderView::section { background-color: #2E5CB8; color: white; font-weight: bold; }"
+        )
+        
+        self.u_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.u_table.setSelectionMode(QTableWidget.NoSelection)
+        
+        # Убираем нумерацию строк для всех таблиц
+        self.n_table.verticalHeader().setVisible(False)
+        self.sigma_table.verticalHeader().setVisible(False)
+        self.u_table.verticalHeader().setVisible(False)
+        
+        # Располагаем таблицы в группах
+        n_layout = QVBoxLayout()
+        n_layout.addWidget(self.n_table)
+        n_group.setLayout(n_layout)
+        
+        sigma_layout = QVBoxLayout()
+        sigma_layout.addWidget(self.sigma_table)
+        sigma_group.setLayout(sigma_layout)
+        
+        u_layout = QVBoxLayout()
+        u_layout.addWidget(self.u_table)
+        u_group.setLayout(u_layout)
+        
+        # Добавляем группы в основной layout
+        layout.addWidget(n_group)
+        layout.addWidget(sigma_group)
+        layout.addWidget(u_group)
         
         self.tab_tables.setLayout(layout)
     
@@ -221,6 +278,42 @@ class ResultsDialog(QDialog):
         if 0 <= element_idx < len(self.bars):
             bar_length = self.bars[element_idx]['L']
             self.local_coord_input.setPlaceholderText(f"0 - {bar_length:.2f} м")
+
+    def calculate_section(self):
+        """Расчет результатов в конкретном сечении по локальной координате"""
+        try:
+            element_idx = self.element_combo.currentIndex()
+            if element_idx < 0 or element_idx >= len(self.bars):
+                QMessageBox.warning(self, "Ошибка", "Выберите корректный элемент")
+                return
+            
+            x_local = float(self.local_coord_input.text())
+            bar = self.bars[element_idx]
+            
+            if x_local < 0 or x_local > bar['L']:
+                QMessageBox.warning(self, "Ошибка", 
+                                f"Локальная координата должна быть в диапазоне [0, {bar['L']:.2f}] м")
+                return
+                
+        except ValueError:
+            QMessageBox.warning(self, "Ошибка", "Введите корректное числовое значение для локальной координаты")
+            return
+        
+        # Расчет глобальной координаты
+        x_global = sum(bar['L'] for bar in self.bars[:element_idx]) + x_local
+        
+        # Расчет компонент НДС
+        Nx = self.N_coeffs[element_idx][0] + x_local * self.N_coeffs[element_idx][1]
+        sigma_x = Nx / bar['A']
+        Ux = self.U_coeffs[element_idx][0] + x_local * self.U_coeffs[element_idx][1] + (x_local**2) * self.U_coeffs[element_idx][2]
+        
+        # Обновление интерфейса
+        self.section_element.setText(f"Стержень {element_idx + 1}")
+        self.section_local_coord.setText(f"{x_local:.4f}")
+        self.section_global_coord.setText(f"{x_global:.4f}")
+        self.section_Nx.setText(f"{Nx:.4f}")
+        self.section_sigma.setText(f"{sigma_x:.4f}")
+        self.section_Ux.setText(f"{Ux:.8f}")
     
     def calculate_all_results(self):
         """Расчет всех результатов для отображения"""
@@ -283,73 +376,74 @@ class ResultsDialog(QDialog):
         self.canvas.draw()
     
     def calculate_tables(self):
-        """Заполнение таблиц результатов"""
-        results = []
+        """Заполнение таблиц результатов для начальных и конечных точек стержней"""
+        n_data = []
+        sigma_data = []
+        u_data = []
         
         for i, bar in enumerate(self.bars):
-            x_points = np.linspace(0, bar['L'], 8)
+            L = bar['L']
+            A = bar['A']
+            E = bar['E']
+            sigma_allowable = bar['sigma']  # Допускаемое напряжение из входных данных
             
-            for x_local in x_points:
-                x_global = sum(bar['L'] for bar in self.bars[:i]) + x_local
-                
-                Nx = self.N_coeffs[i][0] + x_local * self.N_coeffs[i][1]
-                sigma_x = Nx / bar['A']
-                Ux = self.U_coeffs[i][0] + x_local * self.U_coeffs[i][1] + (x_local**2) * self.U_coeffs[i][2]
-                
-                results.append([
-                    f"{x_global:.4f}",
-                    str(i + 1),
-                    f"{x_local:.4f}",
-                    f"{Nx:.4f}",
-                    f"{sigma_x:.4f}",
-                    # ИЗМЕНЕНО: убрана экспоненциальная форма
-                    f"{Ux:.8f}"
-                ])
+            # Расчет для начала стержня (x=0)
+            Nx_start = self.N_coeffs[i][0] + 0 * self.N_coeffs[i][1]  # N(x) = N0 + N1*x при x=0
+            sigma_start = Nx_start / A  # σ = N/A
+            
+            # Расчет для конца стержня (x=L)
+            Nx_end = self.N_coeffs[i][0] + L * self.N_coeffs[i][1]  # N(x) = N0 + N1*x при x=L
+            sigma_end = Nx_end / A  # σ = N/A
+            
+            # Перемещения в начале и конце стержня
+            Ux_start = self.U_coeffs[i][0]  # u(x) = u0 + u1*x + u2*x² при x=0
+            Ux_end = self.U_coeffs[i][0] + L * self.U_coeffs[i][1] + (L**2) * self.U_coeffs[i][2]  # при x=L
+            
+            # Данные для таблицы продольных сил
+            n_data.append([
+                str(i + 1),
+                f"{Nx_start:.4f}",
+                f"{Nx_end:.4f}"
+            ])
+            
+            # Данные для таблицы напряжений
+            sigma_data.append([
+                str(i + 1),
+                f"{sigma_start:.4f}",
+                f"{sigma_end:.4f}",
+                f"{sigma_allowable:.4f}"
+            ])
+            
+            # Данные для таблицы перемещений
+            u_data.append([
+                str(i + 1),
+                f"{Ux_start:.8f}",
+                f"{Ux_end:.8f}"
+            ])
         
-        self.results_table.setRowCount(len(results))
-        for row, data in enumerate(results):
+        # Заполняем таблицу продольных сил
+        self.n_table.setRowCount(len(n_data))
+        for row, data in enumerate(n_data):
             for col, value in enumerate(data):
                 item = QTableWidgetItem(value)
-                # ДЕЛАЕМ ЯЧЕЙКУ НЕРЕДАКТИРУЕМОЙ
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                self.results_table.setItem(row, col, item)
-    
-    def calculate_section(self):
-        """Расчет результатов в конкретном сечении по локальной координате"""
-        try:
-            element_idx = self.element_combo.currentIndex()
-            if element_idx < 0 or element_idx >= len(self.bars):
-                QMessageBox.warning(self, "Ошибка", "Выберите корректный элемент")
-                return
-            
-            x_local = float(self.local_coord_input.text())
-            bar = self.bars[element_idx]
-            
-            if x_local < 0 or x_local > bar['L']:
-                QMessageBox.warning(self, "Ошибка", 
-                                f"Локальная координата должна быть в диапазоне [0, {bar['L']:.2f}] м")
-                return
-                
-        except ValueError:
-            QMessageBox.warning(self, "Ошибка", "Введите корректное числовое значение для локальной координаты")
-            return
+                self.n_table.setItem(row, col, item)
         
-        # Расчет глобальной координаты
-        x_global = sum(bar['L'] for bar in self.bars[:element_idx]) + x_local
+        # Заполняем таблицу напряжений
+        self.sigma_table.setRowCount(len(sigma_data))
+        for row, data in enumerate(sigma_data):
+            for col, value in enumerate(data):
+                item = QTableWidgetItem(value)
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                self.sigma_table.setItem(row, col, item)
         
-        # Расчет компонент НДС
-        Nx = self.N_coeffs[element_idx][0] + x_local * self.N_coeffs[element_idx][1]
-        sigma_x = Nx / bar['A']
-        Ux = self.U_coeffs[element_idx][0] + x_local * self.U_coeffs[element_idx][1] + (x_local**2) * self.U_coeffs[element_idx][2]
-        
-        # Обновление интерфейса
-        self.section_element.setText(f"Стержень {element_idx + 1}")
-        self.section_local_coord.setText(f"{x_local:.4f}")
-        self.section_global_coord.setText(f"{x_global:.4f}")
-        self.section_Nx.setText(f"{Nx:.4f}")
-        self.section_sigma.setText(f"{sigma_x:.4f}")
-        # ИЗМЕНЕНО: убрана экспоненциальная форма
-        self.section_Ux.setText(f"{Ux:.8f}")
+        # Заполняем таблицу перемещений
+        self.u_table.setRowCount(len(u_data))
+        for row, data in enumerate(u_data):
+            for col, value in enumerate(data):
+                item = QTableWidgetItem(value)
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                self.u_table.setItem(row, col, item)
     
     def save_report(self):
         """Сохранение полного отчёта"""
@@ -363,35 +457,56 @@ class ResultsDialog(QDialog):
             filename += '.csv'
         
         try:
-            # Создание DataFrame с результатами
-            results_data = []
-            for i, bar in enumerate(self.bars):
-                x_points = np.linspace(0, bar['L'], 8)
-                for x_local in x_points:
-                    x_global = sum(bar['L'] for bar in self.bars[:i]) + x_local
-                    
-                    Nx = self.N_coeffs[i][0] + x_local * self.N_coeffs[i][1]
-                    sigma_x = Nx / bar['A']
-                    Ux = self.U_coeffs[i][0] + x_local * self.U_coeffs[i][1] + (x_local**2) * self.U_coeffs[i][2]
-                    
-                    results_data.append({
-                        'Глобальная координата, м': x_global,
-                        'Элемент': i + 1,
-                        'Локальная координата, м': x_local,
-                        'Nx, Н': Nx,
-                        'σx, Па': sigma_x,
-                        # ИЗМЕНЕНО: убрана экспоненциальная форма
-                        'Ux, м': f"{Ux:.8f}"
-                    })
+            # Создание DataFrame с результатами по стержням
+            n_data = []
+            sigma_data = []
+            u_data = []
             
-            df = pd.DataFrame(results_data)
+            for i, bar in enumerate(self.bars):
+                L = bar['L']
+                A = bar['A']
+                sigma_allowable = bar['sigma']  # Допускаемое напряжение из входных данных
+                
+                # Расчет для начала стержня (x=0)
+                Nx_start = self.N_coeffs[i][0] + 0 * self.N_coeffs[i][1]
+                sigma_start = Nx_start / A
+                
+                # Расчет для конца стержня (x=L)
+                Nx_end = self.N_coeffs[i][0] + L * self.N_coeffs[i][1]
+                sigma_end = Nx_end / A
+                
+                # Перемещения
+                Ux_start = self.U_coeffs[i][0]
+                Ux_end = self.U_coeffs[i][0] + L * self.U_coeffs[i][1] + (L**2) * self.U_coeffs[i][2]
+                
+                n_data.append({
+                    'Номер стержня': i + 1,
+                    'Nx в начале стержня, Н': Nx_start,
+                    'Nx в конце стержня, Н': Nx_end
+                })
+                
+                sigma_data.append({
+                    'Номер стержня': i + 1,
+                    'σx в начале стержня, Па': sigma_start,
+                    'σx в конце стержня, Па': sigma_end,
+                    'Допустимое напряжение, Па': sigma_allowable
+                })
+                
+                u_data.append({
+                    'Номер стержня': i + 1,
+                    'Ux в начале стержня, м': Ux_start,
+                    'Ux в конце стержня, м': Ux_end
+                })
+            
+            df_n = pd.DataFrame(n_data)
+            df_sigma = pd.DataFrame(sigma_data)
+            df_u = pd.DataFrame(u_data)
             
             # Добавление информации о перемещениях узлов
             nodes_data = []
             for i, u in enumerate(self.U):
                 nodes_data.append({
                     'Узел': i + 1,
-                    # ИЗМЕНЕНО: убрана экспоненциальная форма
                     'Перемещение Δ, м': f"{u:.8f}",
                     'Перемещение Δ, мм': f"{u * 1000:.6f}"
                 })
@@ -411,17 +526,21 @@ class ResultsDialog(QDialog):
                 max_node = np.argmax(self.U) + 1
                 min_node = np.argmin(self.U) + 1
                 
-                # ИЗМЕНЕНО: убрана экспоненциальная форма
                 f.write(f"Максимальное перемещение: узел {max_node}, Δ = {max_disp:.8f} м\n")
                 f.write(f"Минимальное перемещение: узел {min_node}, Δ = {min_disp:.8f} м\n")
                 f.write("=====================================\n\n")
                 
                 f.write("ПЕРЕМЕЩЕНИЯ УЗЛОВ:\n")
                 df_nodes.to_csv(f, index=False, sep=';')
-                f.write("\n\nРЕЗУЛЬТАТЫ ПО СЕЧЕНИЯМ:\n")
-                df.to_csv(f, index=False, sep=';')
+                f.write("\n\nПРОДОЛЬНЫЕ СИЛЫ:\n")
+                df_n.to_csv(f, index=False, sep=';')
+                f.write("\n\nНОРМАЛЬНЫЕ НАПРЯЖЕНИЯ:\n")
+                df_sigma.to_csv(f, index=False, sep=';')
+                f.write("\n\nПЕРЕМЕЩЕНИЯ СТЕРЖНЕЙ:\n")
+                df_u.to_csv(f, index=False, sep=';')
             
             QMessageBox.information(self, "Успех", f"Отчёт сохранён в файл:\n{filename}")
             
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка при сохранении отчёта:\n{e}")
+
