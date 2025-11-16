@@ -620,100 +620,300 @@ class ResultsDialog(QDialog):
                 self.u_table.setItem(row, col, item)
     
     def save_report(self):
-        """Сохранение полного отчёта"""
+        """Сохранение полного отчёта в PDF"""
         from PySide6.QtWidgets import QFileDialog
-        
-        filename, _ = QFileDialog.getSaveFileName(self, 'Сохранить отчёт', filter='*.csv')
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        import datetime
+        import tempfile
+        import os
+        import numpy as np
+
+        # Регистрация шрифта с поддержкой кириллицы
+        try:
+            # Попробуем использовать стандартный шрифт с кириллицей
+            pdfmetrics.registerFont(TTFont('Arial', 'arial.ttf'))
+            FONT_NAME = 'Arial'
+        except:
+            try:
+                # Альтернативный шрифт
+                pdfmetrics.registerFont(TTFont('DejaVuSans', 'DejaVuSans.ttf'))
+                FONT_NAME = 'DejaVuSans'
+            except:
+                # Если шрифты не найдены, используем стандартный (кириллица может не отображаться)
+                FONT_NAME = 'Helvetica'
+
+        filename, _ = QFileDialog.getSaveFileName(self, 'Сохранить отчёт в PDF', filter='*.pdf')
         if not filename:
             return
             
-        if not filename.endswith('.csv'):
-            filename += '.csv'
+        if not filename.endswith('.pdf'):
+            filename += '.pdf'
         
         try:
-            # Создание DataFrame с результатами по стержням
-            n_data = []
-            sigma_data = []
-            u_data = []
+            # Создаем временный файл для графиков
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                temp_plot_path = tmp.name
+
+            # Сохраняем графики в временный файл
+            self.fig.savefig(temp_plot_path, dpi=150, bbox_inches='tight', format='png')
             
+            # Создаем документ PDF
+            doc = SimpleDocTemplate(filename, pagesize=A4, topMargin=20*mm, bottomMargin=20*mm)
+            elements = []
+            styles = getSampleStyleSheet()
+            
+            # Создаем стили с правильным шрифтом
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontName=FONT_NAME,
+                fontSize=16,
+                spaceAfter=30,
+                alignment=1,
+                textColor=colors.darkblue
+            )
+            
+            heading_style = ParagraphStyle(
+                'CustomHeading',
+                parent=styles['Heading2'],
+                fontName=FONT_NAME,
+                fontSize=12,
+                spaceAfter=12,
+                spaceBefore=12,
+                textColor=colors.darkblue
+            )
+            
+            subheading_style = ParagraphStyle(
+                'SubheadingStyle',
+                parent=styles['Heading3'],
+                fontName=FONT_NAME,
+                fontSize=11,
+                spaceAfter=8,
+                spaceBefore=8,
+                textColor=colors.darkblue
+            )
+            
+            normal_style = ParagraphStyle(
+                'NormalStyle',
+                parent=styles['Normal'],
+                fontName=FONT_NAME,
+                fontSize=10
+            )
+            
+            # Заголовок отчета
+            title = Paragraph("ОТЧЁТ ПО РАСЧЁТУ СТЕРЖНЕВОЙ СИСТЕМЫ", title_style)
+            elements.append(title)
+            
+            # Информация о системе
+            elements.append(Paragraph(f"Дата создания: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')}", normal_style))
+            elements.append(Paragraph(f"Количество элементов: {len(self.bars)}", normal_style))
+            elements.append(Paragraph(f"Общая длина конструкции: {self.total_length:.4f} м", normal_style))
+            elements.append(Paragraph(f"Количество узлов: {len(self.U)}", normal_style))
+            
+            # Анализ результатов
+            max_disp = np.max(self.U)
+            min_disp = np.min(self.U)
+            max_node = np.argmax(self.U) + 1
+            min_node = np.argmin(self.U) + 1
+            
+            # Раздел 1: Перемещения узлов
+            elements.append(Paragraph("1. ПЕРЕМЕЩЕНИЯ УЗЛОВ", heading_style))
+            node_data = [["Узел", "Перемещение Δ, м", "Перемещение Δ, мм"]]
+            for i, u in enumerate(self.U):
+                node_data.append([str(i+1), f"{u:.8f}", f"{u*1000:.6f}"])
+            
+            node_table = Table(node_data, colWidths=[30*mm, 60*mm, 60*mm])
+            node_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2E5CB8")),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('FONTNAME', (0,0), (-1,0), FONT_NAME),
+                ('FONTSIZE', (0,0), (-1,0), 10),
+                ('BOTTOMPADDING', (0,0), (-1,0), 12),
+                ('BACKGROUND', (0,1), (-1,-1), colors.beige),
+                ('FONTNAME', (0,1), (-1,-1), FONT_NAME),
+                ('FONTSIZE', (0,1), (-1,-1), 9),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black)
+            ]))
+            elements.append(node_table)
+            elements.append(Spacer(1, 25))
+            
+            # Раздел 2: Эпюры
+            elements.append(Paragraph("2. ЭПЮРЫ НАПРЯЖЁННО-ДЕФОРМИРОВАННОГО СОСТОЯНИЯ", heading_style))
+            try:
+                # Добавляем изображение с графиками
+                img = Image(temp_plot_path, width=160*mm, height=120*mm)
+                elements.append(img)
+                elements.append(Spacer(1, 15))
+            except Exception as e:
+                elements.append(Paragraph("Ошибка при загрузке графиков", normal_style))
+            
+            elements.append(Spacer(1, 20))
+            
+            # Раздел 3: Таблицы результатов
+            elements.append(Paragraph("3. ТАБЛИЦЫ РЕЗУЛЬТАТОВ", heading_style))
+            
+            # Таблица продольных сил
+            elements.append(Paragraph("Продольные силы Nx", heading_style))
+            n_data = [["Номер стержня", "Nx в начале, Н", "Nx в конце, Н"]]
+            for i, bar in enumerate(self.bars):
+                L = bar['L']
+                Nx_start = self.N_coeffs[i][0] + 0 * self.N_coeffs[i][1]
+                Nx_end = self.N_coeffs[i][0] + L * self.N_coeffs[i][1]
+                n_data.append([str(i+1), f"{Nx_start:.4f}", f"{Nx_end:.4f}"])
+            
+            n_table = Table(n_data, colWidths=[30*mm, 50*mm, 50*mm])
+            n_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2E5CB8")),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('FONTNAME', (0,0), (-1,0), FONT_NAME),
+                ('FONTSIZE', (0,0), (-1,0), 9),
+                ('BOTTOMPADDING', (0,0), (-1,0), 12),
+                ('BACKGROUND', (0,1), (-1,-1), colors.beige),
+                ('FONTNAME', (0,1), (-1,-1), FONT_NAME),
+                ('FONTSIZE', (0,1), (-1,-1), 8),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black)
+            ]))
+            elements.append(n_table)
+            elements.append(Spacer(1, 15))
+            
+            # Таблица нормальных напряжений
+            elements.append(Paragraph("Нормальные напряжения σx", heading_style))
+            sigma_data = [["Номер стержня", "σx в начале, Па", "σx в конце, Па", "Допустимое, Па"]]
             for i, bar in enumerate(self.bars):
                 L = bar['L']
                 A = bar['A']
-                sigma_allowable = bar['sigma']  # Допускаемое напряжение из входных данных
-                
-                # Расчет для начала стержня (x=0)
+                sigma_allowable = bar['sigma']
                 Nx_start = self.N_coeffs[i][0] + 0 * self.N_coeffs[i][1]
-                sigma_start = Nx_start / A
-                
-                # Расчет для конца стержня (x=L)
                 Nx_end = self.N_coeffs[i][0] + L * self.N_coeffs[i][1]
+                sigma_start = Nx_start / A
                 sigma_end = Nx_end / A
-                
-                # Перемещения
+                sigma_data.append([str(i+1), f"{sigma_start:.4f}", f"{sigma_end:.4f}", f"{sigma_allowable:.4f}"])
+            
+            sigma_table = Table(sigma_data, colWidths=[25*mm, 45*mm, 45*mm, 45*mm])
+            sigma_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2E5CB8")),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('FONTNAME', (0,0), (-1,0), FONT_NAME),
+                ('FONTSIZE', (0,0), (-1,0), 8),
+                ('BOTTOMPADDING', (0,0), (-1,0), 12),
+                ('BACKGROUND', (0,1), (-1,-1), colors.beige),
+                ('FONTNAME', (0,1), (-1,-1), FONT_NAME),
+                ('FONTSIZE', (0,1), (-1,-1), 7),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black)
+            ]))
+            elements.append(sigma_table)
+            elements.append(Spacer(1, 15))
+            
+            # Таблица перемещений стержней
+            elements.append(Paragraph("Перемещения стержней Ux", heading_style))
+            u_data = [["Номер стержня", "Ux в начале, м", "Ux в конце, м"]]
+            for i, bar in enumerate(self.bars):
+                L = bar['L']
                 Ux_start = self.U_coeffs[i][0]
                 Ux_end = self.U_coeffs[i][0] + L * self.U_coeffs[i][1] + (L**2) * self.U_coeffs[i][2]
-                
-                n_data.append({
-                    'Номер стержня': i + 1,
-                    'Nx в начале стержня, Н': Nx_start,
-                    'Nx в конце стержня, Н': Nx_end
-                })
-                
-                sigma_data.append({
-                    'Номер стержня': i + 1,
-                    'σx в начале стержня, Па': sigma_start,
-                    'σx в конце стержня, Па': sigma_end,
-                    'Допустимое напряжение, Па': sigma_allowable
-                })
-                
-                u_data.append({
-                    'Номер стержня': i + 1,
-                    'Ux в начале стержня, м': Ux_start,
-                    'Ux в конце стержня, м': Ux_end
-                })
+                u_data.append([str(i+1), f"{Ux_start:.8f}", f"{Ux_end:.8f}"])
             
-            df_n = pd.DataFrame(n_data)
-            df_sigma = pd.DataFrame(sigma_data)
-            df_u = pd.DataFrame(u_data)
+            u_table = Table(u_data, colWidths=[30*mm, 60*mm, 60*mm])
+            u_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2E5CB8")),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('FONTNAME', (0,0), (-1,0), FONT_NAME),
+                ('FONTSIZE', (0,0), (-1,0), 9),
+                ('BOTTOMPADDING', (0,0), (-1,0), 12),
+                ('BACKGROUND', (0,1), (-1,-1), colors.beige),
+                ('FONTNAME', (0,1), (-1,-1), FONT_NAME),
+                ('FONTSIZE', (0,1), (-1,-1), 8),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black)
+            ]))
+            elements.append(u_table)
             
-            # Добавление информации о перемещениях узлов
-            nodes_data = []
-            for i, u in enumerate(self.U):
-                nodes_data.append({
-                    'Узел': i + 1,
-                    'Перемещение Δ, м': f"{u:.8f}",
-                    'Перемещение Δ, мм': f"{u * 1000:.6f}"
-                })
-            df_nodes = pd.DataFrame(nodes_data)
+            # Раздел 4: Детальные результаты по стержням
+            elements.append(PageBreak())  # Новый раздел на новой странице
+            elements.append(Paragraph("4. ДЕТАЛЬНЫЕ РЕЗУЛЬТАТЫ ПО СТЕРЖНЯМ", heading_style))
             
-            # Сохранение в файл с дополнительной информацией
-            with open(filename, 'w', encoding='utf-8') as f:
-                f.write("ОТЧЁТ ПО РАСЧЁТУ СТЕРЖНЕВОЙ СИСТЕМЫ\n")
-                f.write("=====================================\n")
-                f.write(f"Количество элементов: {len(self.bars)}\n")
-                f.write(f"Общая длина конструкции: {self.total_length:.4f} м\n")
-                f.write(f"Количество узлов: {len(self.U)}\n")
+            for bar_idx, bar in enumerate(self.bars):
+                L = bar['L']
+                A = bar['A']
                 
-                # Анализ результатов
-                max_disp = np.max(self.U)
-                min_disp = np.min(self.U)
-                max_node = np.argmax(self.U) + 1
-                min_node = np.argmin(self.U) + 1
+                # Подзаголовок для текущего стержня
+                elements.append(Paragraph(f"Стержень {bar_idx+1} (L={L:.3f} м, A={A:.6f} м²)", subheading_style))
                 
-                f.write(f"Максимальное перемещение: узел {max_node}, Δ = {max_disp:.8f} м\n")
-                f.write(f"Минимальное перемещение: узел {min_node}, Δ = {min_disp:.8f} м\n")
-                f.write("=====================================\n\n")
+                # Создаем точки с шагом 0.1 м
+                step = 0.1
+                x_points = np.arange(0, L + step, step)
+                # Убедимся, что последняя точка точно равна L
+                if x_points[-1] > L:
+                    x_points[-1] = L
+                elif x_points[-1] < L:
+                    x_points = np.append(x_points, L)
                 
-                f.write("ПЕРЕМЕЩЕНИЯ УЗЛОВ:\n")
-                df_nodes.to_csv(f, index=False, sep=';')
-                f.write("\n\nПРОДОЛЬНЫЕ СИЛЫ:\n")
-                df_n.to_csv(f, index=False, sep=';')
-                f.write("\n\nНОРМАЛЬНЫЕ НАПРЯЖЕНИЯ:\n")
-                df_sigma.to_csv(f, index=False, sep=';')
-                f.write("\n\nПЕРЕМЕЩЕНИЯ СТЕРЖНЕЙ:\n")
-                df_u.to_csv(f, index=False, sep=';')
+                # Создаем данные для таблицы
+                detailed_data = [["Индекс", "x, м", "Nx, Н", "σx, Па", "Ux, м"]]
+                
+                for i, x in enumerate(x_points):
+                    # Расчет компонент НДС
+                    Nx = self.N_coeffs[bar_idx][0] + x * self.N_coeffs[bar_idx][1]
+                    sigma_x = Nx / A
+                    Ux = (self.U_coeffs[bar_idx][0] + 
+                        x * self.U_coeffs[bar_idx][1] + 
+                        (x**2) * self.U_coeffs[bar_idx][2])
+                    
+                    detailed_data.append([
+                        str(i),
+                        f"{x:.4f}",
+                        f"{Nx:.4f}",
+                        f"{sigma_x:.4f}",
+                        f"{Ux:.8f}"
+                    ])
+                
+                # Создаем таблицу с детальными результатами
+                detailed_table = Table(detailed_data, colWidths=[20*mm, 25*mm, 35*mm, 35*mm, 45*mm])
+                detailed_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2E5CB8")),
+                    ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                    ('FONTNAME', (0,0), (-1,0), FONT_NAME),
+                    ('FONTSIZE', (0,0), (-1,0), 8),
+                    ('BOTTOMPADDING', (0,0), (-1,0), 8),
+                    ('BACKGROUND', (0,1), (-1,-1), colors.beige),
+                    ('FONTNAME', (0,1), (-1,-1), FONT_NAME),
+                    ('FONTSIZE', (0,1), (-1,-1), 7),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                    ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.lightgrey])
+                ]))
+                
+                elements.append(detailed_table)
+                elements.append(Spacer(1, 15))
+                
+                # Добавляем разрыв страницы после каждого стержня, если он не последний
+                if bar_idx < len(self.bars) - 1:
+                    elements.append(PageBreak())
+            
+            # Строим PDF
+            doc.build(elements)
+            
+            # Удаляем временный файл
+            if os.path.exists(temp_plot_path):
+                os.unlink(temp_plot_path)
             
             QMessageBox.information(self, "Успех", f"Отчёт сохранён в файл:\n{filename}")
             
+        except ImportError as e:
+            QMessageBox.critical(self, "Ошибка", 
+                            "Для сохранения в PDF необходимо установить библиотеки:\n"
+                            "pip install reportlab pillow")
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Ошибка при сохранении отчёта:\n{e}")
+            # Удаляем временный файл в случае ошибки
+            if 'temp_plot_path' in locals() and os.path.exists(temp_plot_path):
+                os.unlink(temp_plot_path)
+            QMessageBox.critical(self, "Ошибка", f"Ошибка при сохранении отчёта:\n{str(e)}")
