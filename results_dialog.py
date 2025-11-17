@@ -407,7 +407,7 @@ class ResultsDialog(QDialog):
             compliance_text = "✅ Да (напряжение в норме)"
             compliance_style = "background-color: #d4ffd4; color: #006400; padding: 4px; border: 1px solid #00aa00;"
         else:
-            compliance_text = "❌ Нет (превышение допустимого напряжения!)"
+            compliance_text = "❌ Нет (превышение допускаемого напряжения!)"
             compliance_style = "background-color: #ffd4d4; color: #8b0000; padding: 4px; border: 1px solid #ff0000; font-weight: bold;"
         
         # Обновление интерфейса
