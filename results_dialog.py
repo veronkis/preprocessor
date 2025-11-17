@@ -172,7 +172,7 @@ class ResultsDialog(QDialog):
             "Номер стержня", 
             "σx в начале стержня, Па", 
             "σx в конце стержня, Па", 
-            "Допустимое напряжение, Па",
+            "Допускаемое напряжение, Па",
             "Соответствие норме"  # НОВЫЙ СТОЛБЕЦ
         ])
         self.sigma_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -339,7 +339,7 @@ class ResultsDialog(QDialog):
         self.section_global_coord = QLabel("-")
         self.section_Nx = QLabel("-")
         self.section_sigma = QLabel("-")
-        self.section_sigma_allowable = QLabel("-")  # НОВОЕ: допустимое напряжение
+        self.section_sigma_allowable = QLabel("-")  # НОВОЕ: допускаемое напряжение
         self.section_compliance = QLabel("-")       # НОВОЕ: соответствие норме
         self.section_Ux = QLabel("-")
         
@@ -354,7 +354,7 @@ class ResultsDialog(QDialog):
         results_layout.addRow("Глобальная координата, м:", self.section_global_coord)
         results_layout.addRow("Продольная сила Nx, Н:", self.section_Nx)
         results_layout.addRow("Нормальное напряжение σx, Па:", self.section_sigma)
-        results_layout.addRow("Допустимое напряжение, Па:", self.section_sigma_allowable)  # НОВАЯ СТРОКА
+        results_layout.addRow("Допускаемое напряжение, Па:", self.section_sigma_allowable)  # НОВАЯ СТРОКА
         results_layout.addRow("Соответствие норме:", self.section_compliance)              # НОВАЯ СТРОКА
         results_layout.addRow("Перемещение Ux, м:", self.section_Ux)
         
@@ -879,7 +879,7 @@ class ResultsDialog(QDialog):
             
           # Таблица нормальных напряжений - ОБНОВЛЕНА С ДОБАВЛЕНИЕМ СТОЛБЦА "СООТВЕТСТВИЕ НОРМЕ"
             elements.append(Paragraph("Нормальные напряжения σx", heading_style))
-            sigma_data = [["Номер стержня", "σx в начале, Па", "σx в конце, Па", "Допустимое, Па", "Соответствие норме"]]
+            sigma_data = [["Номер стержня", "σx в начале, Па", "σx в конце, Па", "Допускаемое напряжение, Па", "Соответствие норме"]]
 
             for i, bar in enumerate(self.bars):
                 L = bar['L']
